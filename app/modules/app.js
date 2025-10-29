@@ -650,6 +650,7 @@ function updateWaitingUI(position) {
 
         // Keep both markers in view
         miniMap.fitBounds(L.latLngBounds(userLatLng, [targetCoords.lat, targetCoords.lon]), { padding: [20, 20], maxZoom: 17 });
+        scheduleMiniMapResize();
     }
 
     // Calculations
@@ -1657,70 +1658,57 @@ function ensurePopupVisible(popup, popupOptions = null) {
         return;
     }
 
-    const attempts = popup[POPUP_VISIBILITY_ATTEMPT_KEY] ?? 0;
-    if (attempts > 3) {
-        resetPopupVisibilityAttempts(popup);
+    const latLng = typeof popup.getLatLng === 'function' ? popup.getLatLng() : null;
+    if (!latLng) {
         return;
     }
 
-    const schedule = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
-        ? window.requestAnimationFrame.bind(window)
-        : (fn) => setTimeout(fn, 16);
+    if (popup[POPUP_VISIBILITY_ATTEMPT_KEY]) {
+        return;
+    }
 
-    schedule(() => {
-        const popupElement = typeof popup.getElement === 'function' ? popup.getElement() : popup._container;
-        const container = mapContainer && typeof mapContainer.getBoundingClientRect === 'function'
-            ? mapContainer
-            : (typeof map.getContainer === 'function' ? map.getContainer() : null);
-
-        if (!popupElement || !container) {
-            return;
+    const mapSize = typeof map.getSize === 'function' ? map.getSize() : null;
+    if (!mapSize || mapSize.x <= 0 || mapSize.y <= 0) {
+        if (typeof map.once === 'function') {
+            map.once('resize', () => ensurePopupVisible(popup, popupOptions));
         }
+        return;
+    }
 
-        const mapRect = container.getBoundingClientRect();
-        const popupRect = popupElement.getBoundingClientRect();
+    const options = popupOptions || getVisitedLocationPopupOptions();
 
-        if (!mapRect || !popupRect) {
-            return;
-        }
+    const visibilityPadding = (options && options.visibilityPadding)
+        || popup.__queueCheckVisibilityPadding
+        || DEFAULT_VISIBILITY_PADDING;
 
-        const padding = (popupOptions && popupOptions.visibilityPadding)
-            || popup.__queueCheckVisibilityPadding
-            || DEFAULT_VISIBILITY_PADDING;
+    const topLeftPadding = options?.autoPanPaddingTopLeft
+        || createLeafletPoint(
+            visibilityPadding.left ?? DEFAULT_VISIBILITY_PADDING.left,
+            visibilityPadding.top ?? DEFAULT_VISIBILITY_PADDING.top
+        );
 
-        const leftBound = mapRect.left + (padding.left ?? DEFAULT_VISIBILITY_PADDING.left);
-        const rightBound = mapRect.right - (padding.right ?? DEFAULT_VISIBILITY_PADDING.right);
-        const topBound = mapRect.top + (padding.top ?? DEFAULT_VISIBILITY_PADDING.top);
-        const bottomBound = mapRect.bottom - (padding.bottom ?? DEFAULT_VISIBILITY_PADDING.bottom);
+    const bottomRightPadding = options?.autoPanPaddingBottomRight
+        || createLeafletPoint(
+            visibilityPadding.right ?? DEFAULT_VISIBILITY_PADDING.right,
+            visibilityPadding.bottom ?? DEFAULT_VISIBILITY_PADDING.bottom
+        );
 
-        let offsetX = 0;
-        if (popupRect.left < leftBound) {
-            offsetX = leftBound - popupRect.left;
-        } else if (popupRect.right > rightBound) {
-            offsetX = -(popupRect.right - rightBound);
-        }
+    const panOptions = {
+        paddingTopLeft: topLeftPadding,
+        paddingBottomRight: bottomRightPadding,
+        animate: true,
+        duration: 0.35,
+        easeLinearity: 0.25,
+        noMoveStart: true
+    };
 
-        let offsetY = 0;
-        if (popupRect.top < topBound) {
-            offsetY = topBound - popupRect.top;
-        } else if (popupRect.bottom > bottomBound) {
-            offsetY = -(popupRect.bottom - bottomBound);
-        }
+    popup[POPUP_VISIBILITY_ATTEMPT_KEY] = true;
 
-        if (offsetX !== 0 || offsetY !== 0) {
-            popup[POPUP_VISIBILITY_ATTEMPT_KEY] = attempts + 1;
-            map.panBy([offsetX, offsetY], {
-                animate: true,
-                duration: 0.35,
-                easeLinearity: 0.25,
-                noMoveStart: true
-            });
-
-            map.once('moveend', () => ensurePopupVisible(popup, popupOptions));
-        } else if (attempts > 0) {
-            resetPopupVisibilityAttempts(popup);
-        }
-    });
+    if (typeof map.panInside === 'function') {
+        map.panInside(latLng, panOptions);
+    } else {
+        map.panTo(latLng, panOptions);
+    }
 }
 
 function renderVisitedLocationsOnMap() {
@@ -2502,19 +2490,22 @@ function displayApiError(message, element) {
 
 // --- 10. Mini Map Functions ---
 function initMiniMap() {
-    if (miniMap) {
-        miniMap.remove();
-        miniMap = null;
-    }
-    if (!targetCoords) return;
+    if (!targetCoords || !miniMapEl) return;
 
     try {
-        if (!miniMapEl) return;
+        if (miniMap) {
+            miniMap.remove();
+            miniMap = null;
+        }
 
-        miniMapEl.innerHTML = ''; // Clear any error messages
+        if (miniMapEl._leaflet_id) {
+            delete miniMapEl._leaflet_id;
+        }
 
-        miniMap = L.map('mini-map', { 
-            zoomControl: false, 
+        miniMapEl.innerHTML = '';
+
+        miniMap = L.map(miniMapEl, {
+            zoomControl: false,
             scrollWheelZoom: false,
             dragging: false,
             touchZoom: false,
@@ -2524,15 +2515,13 @@ function initMiniMap() {
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(miniMap);
         miniMapTargetMarker = L.marker([targetCoords.lat, targetCoords.lon]).addTo(miniMap);
 
-        // If user location is already known, add it
         if (lastKnownPosition) {
             const userLatLng = L.latLng(lastKnownPosition.coords.latitude, lastKnownPosition.coords.longitude);
             miniMapUserMarker = L.marker(userLatLng, { icon: userIcon }).addTo(miniMap);
             miniMap.fitBounds(L.latLngBounds(userLatLng, [targetCoords.lat, targetCoords.lon]), { padding: [20, 20], maxZoom: 17 });
         }
 
-        // Fix for grey map bug
-        miniMap.invalidateSize(); 
+        scheduleMiniMapResize();
 
     } catch (e) {
         console.error("Error initializing mini-map:", e);
@@ -2544,11 +2533,44 @@ function initMiniMap() {
     updateState();
 }
 
+function scheduleMiniMapResize() {
+    if (!miniMap) {
+        return;
+    }
+
+    const invalidate = () => {
+        if (miniMap) {
+            miniMap.invalidateSize();
+        }
+    };
+
+    const raf = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+        ? window.requestAnimationFrame.bind(window)
+        : (fn) => setTimeout(fn, 16);
+
+    raf(() => {
+        invalidate();
+        setTimeout(invalidate, 120);
+    });
+
+    if (typeof miniMap.whenReady === 'function') {
+        miniMap.whenReady(() => {
+            invalidate();
+            setTimeout(invalidate, 200);
+        });
+    }
+}
+
 function destroyMiniMap() {
     if (miniMap) {
         miniMap.remove();
         miniMap = null;
     }
+
+    if (miniMapEl && miniMapEl._leaflet_id) {
+        delete miniMapEl._leaflet_id;
+    }
+
     miniMapTargetMarker = null;
     miniMapUserMarker = null;
 
