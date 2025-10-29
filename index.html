@@ -1429,7 +1429,7 @@
 
             const db = getDb();
 
-            for (const [, data] of Object.entries(db)) {
+            for (const [id, data] of Object.entries(db)) {
                 if (!data || !data.coords || !data.totalCheckIns) continue;
 
                 const rawLat = data.coords.lat ?? data.coords.latitude;
@@ -1449,80 +1449,13 @@
                     fillOpacity: 0.2
                 }).addTo(visitedLocationsLayer);
 
-                const averageWaitLabel = data.totalCheckIns > 0
-                    ? formatDurationWithUnits(data.avgWaitSeconds)
-                    : 'אין עדיין מידע';
+                const locationName = data.name || `מיקום (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
 
-                const visitList = Array.isArray(data.visits) ? data.visits : [];
-                const recentVisits = visitList.slice(0, 3);
-                const stats = computeLocationStats(visitList);
-                const { dayIndex, hourIndex } = getCurrentTimeContext();
-                const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
-                const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
-                const hourlyChartHtml = renderHourlyChart(todaysHourly, hourIndex, {
-                    variant: 'map',
-                    emptyMessage: 'אין עדיין נתונים לשעות היום במיקום זה.',
-                    hideLabels: true,
-                    height: 56
-                });
-                const weeklySummaryHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
-                    variant: 'map',
-                    compact: true,
-                    emptyMessage: 'אין עדיין נתונים שבועיים במיקום זה.'
-                });
-
-                let popupContent = `
-                    <div dir="rtl" style="text-align: right; max-width: 260px;">
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.75rem; margin-bottom:0.35rem;">
-                            <div style="font-weight: 600; font-size: 0.95rem;">${data.name}</div>
-                            <button type="button" class="map-popup-close-btn" aria-label="סגירת חלון מידע" title="סגירה" style="border: none; background: #eff6ff; color: #1d4ed8; border-radius: 999px; width: 1.6rem; height: 1.6rem; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; cursor: pointer;">
-                                ×
-                            </button>
-                        </div>
-                        <div style="font-size: 0.82rem;">צ'ק-אינים: <strong>${data.totalCheckIns}</strong></div>
-                        <div style="font-size: 0.82rem;">זמן המתנה ממוצע: <strong>${averageWaitLabel}</strong></div>
-                        <div style="margin-top: 0.5rem; font-size: 0.75rem;">
-                            <div style="font-weight: 600;">שעה נוכחית (${DAY_NAMES_HE[dayIndex]} · ${formatHourLabel(hourIndex)}):</div>
-                            <div style="color: #1d4ed8; font-weight: 600;">${currentHourStats.label}</div>
-                        </div>
-                        <div style="margin-top: 0.5rem;">
-                            <div style="font-weight: 600; font-size: 0.75rem; margin-bottom: 0.25rem;">ממוצע לפי שעה (היום)</div>
-                            ${hourlyChartHtml}
-                        </div>
-                        <div style="margin-top: 0.5rem;">
-                            <div style="font-weight: 600; font-size: 0.75rem; margin-bottom: 0.25rem;">מבט שבועי</div>
-                            ${weeklySummaryHtml}
-                        </div>
-                `;
-
-                if (recentVisits.length > 0) {
-                    const visitsHtml = recentVisits
-                        .map((visit) => {
-                            const waitTime = formatDuration(visit.waitSeconds);
-                            const when = formatTimestamp(visit.timestamp);
-                            return `<li style="margin: 0.25rem 0;">${when} · ${waitTime} דקות</li>`;
-                        })
-                        .join('');
-
-                    popupContent += `
-                        <div style="margin-top: 0.5rem; font-size: 0.8125rem;">
-                            <div style="font-weight: 600;">ביקורים אחרונים:</div>
-                            <ul style="padding-right: 1rem; margin: 0; list-style: disc;">${visitsHtml}</ul>
-                        </div>
-                    `;
-                }
-
-                popupContent += '</div>';
-
-                marker.bindPopup(popupContent, { closeButton: false });
-                marker.on('popupopen', (event) => {
-                    const popupEl = event.popup.getElement();
-                    if (!popupEl) return;
-                    const closeBtn = popupEl.querySelector('.map-popup-close-btn');
-                    if (!closeBtn) return;
-                    closeBtn.addEventListener('click', () => {
-                        map.closePopup(event.popup);
-                    });
+                marker.on('click', () => {
+                    if (locationNameInput) {
+                        locationNameInput.value = locationName;
+                    }
+                    selectLocation(lat, lon, locationName, id);
                 });
             }
         }
