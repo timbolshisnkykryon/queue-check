@@ -83,6 +83,24 @@
             z-index: 10;
         }
 
+        .map-location-label {
+            background: rgba(37, 99, 235, 0.92);
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+            border: none;
+            box-shadow: 0 4px 8px rgba(15, 23, 42, 0.25);
+            text-align: center;
+            letter-spacing: 0.01em;
+            line-height: 1.15;
+        }
+
+        .map-location-label:before {
+            display: none;
+        }
+
         /* Loading Spinner */
         .spinner {
             border-top-color: #3498db;
@@ -149,6 +167,38 @@
 
         .safe-bottom-space {
             padding-bottom: calc(1.5rem + var(--safe-area-bottom));
+        }
+
+        .intel-rich-text {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .intel-rich-text p {
+            margin: 0;
+            line-height: 1.6;
+        }
+
+        .intel-rich-text ul {
+            list-style: disc;
+            padding-right: 1.2rem;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .intel-rich-text li::marker {
+            color: rgba(96, 165, 250, 0.85);
+        }
+
+        .intel-rich-text strong {
+            color: #bfdbfe;
+        }
+
+        .intel-rich-text em {
+            color: #e0f2fe;
         }
 
         .safe-bottom-pad {
@@ -464,7 +514,7 @@
                 </div>
 
                 <!-- Target Details Card (Hidden by default) -->
-                <div id="target-details-card" class="absolute right-4 left-4 z-20 p-4 bg-white rounded-xl shadow-2xl transition-all duration-300 translate-y-full max-h-[70vh] overflow-y-auto bottom-safe">
+                <div id="target-details-card" class="absolute right-4 left-4 z-20 p-4 bg-white rounded-xl shadow-2xl transition-all duration-300 translate-y-full max-h-[50vh] overflow-y-auto bottom-safe sm:left-auto sm:w-[min(92vw,420px)]">
                     <!-- Card content is set dynamically by JS -->
                 </div>
             </div>
@@ -521,15 +571,21 @@
                 </div>
                 
                 <!-- Gemini: Intel -->
-                <div class="bg-white bg-opacity-10 p-4 rounded-lg">
-                    <h3 class="text-lg font-semibold mb-3 text-center text-blue-200">פרטי יעד</h3>
-                    <div id="info-loading" class="flex items-center justify-center text-gray-300">
-                        <div class="spinner w-5 h-5 border-2 rounded-full mr-2"></div>
-                        טוען מידע...
+                <div class="bg-white bg-opacity-10 p-4 rounded-2xl shadow-inner">
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <h3 class="text-lg font-semibold text-blue-200">סקירת יעד</h3>
+                        <span class="inline-flex items-center gap-2 rounded-full bg-blue-500/20 text-blue-100 text-xs font-semibold px-3 py-1">
+                            <span class="h-2 w-2 rounded-full bg-blue-300 animate-pulse"></span>
+                            מופעל ע"י Gemini
+                        </span>
                     </div>
-                    <p id="info-error" class="text-red-400 text-center"></p>
-                    <p id="info-result" class="text-gray-200 whitespace-pre-wrap text-sm leading-relaxed"></p>
-                    <div id="info-sources" class="mt-3 text-sm text-gray-400"></div>
+                    <div id="info-loading" class="flex items-center justify-center text-blue-100 text-sm bg-blue-500/10 rounded-xl py-3">
+                        <div class="spinner w-5 h-5 border-2 rounded-full mr-3"></div>
+                        <span>טוען מידע מעודכן...</span>
+                    </div>
+                    <p id="info-error" class="text-red-300 text-center text-sm font-semibold"></p>
+                    <div id="info-result" class="intel-rich-text text-blue-50 text-sm leading-relaxed"></div>
+                    <div id="info-sources" class="mt-4 text-sm text-blue-100 border-t border-white/10 pt-3 hidden"></div>
                 </div>
                 <div id="waiting-sync-indicator" class="waiting-sync-indicator hidden flex flex-col items-center text-center pt-4">
                     <div class="send-beam"><span></span></div>
@@ -586,6 +642,52 @@
         </div>
     </div>
 
+    <!-- Location Intel Modal -->
+    <div id="intel-modal" class="fixed inset-0 bg-slate-900 bg-opacity-85 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto hidden" style="padding-top: calc(1rem + var(--safe-area-top)); padding-bottom: calc(1rem + var(--safe-area-bottom));">
+        <div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100 rounded-2xl shadow-2xl w-full max-w-2xl mx-auto float-in safe-bottom-pad border border-white/10">
+            <div class="flex items-start justify-between gap-4 p-6 pb-4">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-widest text-blue-300">סקירת יעד</p>
+                    <h3 id="intel-modal-title" class="text-2xl font-bold mt-1">שם המיקום</h3>
+                </div>
+                <button id="intel-modal-close-btn" type="button" class="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500/10 text-blue-200 text-2xl leading-none hover:bg-blue-500/20 transition" aria-label="סגירת חלון סקירה">
+                    ×
+                </button>
+            </div>
+            <div class="px-6 pb-6">
+                <div id="intel-modal-body" class="intel-rich-text text-base leading-loose bg-white/5 border border-white/10 rounded-2xl p-5"></div>
+                <div id="intel-modal-sources" class="mt-6 text-sm text-blue-100 hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Location Modal -->
+    <div id="rename-location-modal" class="fixed inset-0 bg-slate-900 bg-opacity-75 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto hidden" style="padding-top: calc(1rem + var(--safe-area-top)); padding-bottom: calc(1rem + var(--safe-area-bottom));" aria-hidden="true">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-auto float-in safe-bottom-pad border border-blue-100">
+            <div class="flex items-center justify-between px-6 pt-6 pb-3 border-b border-gray-100">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-widest text-blue-500">ניהול מיקום</p>
+                </div>
+                <button id="rename-location-close-btn" type="button" class="w-9 h-9 flex items-center justify-center rounded-full bg-blue-100 text-blue-600 text-xl font-semibold leading-none hover:bg-blue-200 transition" aria-label="סגירת חלון שינוי שם">×</button>
+            </div>
+            <form id="rename-location-form" class="px-6 pb-6 pt-4 space-y-5" novalidate>
+                <div class="space-y-2">
+                    <h3 class="text-xl font-semibold text-gray-900">שינוי שם המיקום</h3>
+                    <p class="text-sm text-gray-500">התאימו את שם המקום כך שכל המשתמשים יראו אותו ברשימת המקומות ובמפות.</p>
+                </div>
+                <div class="space-y-2">
+                    <label for="rename-location-input" class="block text-sm font-medium text-gray-700">שם חדש</label>
+                    <input id="rename-location-input" type="text" class="w-full rounded-lg border border-gray-300 px-4 py-2 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="לדוגמה: בית הקפה החמוד" required>
+                    <p id="rename-location-error" class="text-sm text-red-500 min-h-[1.5rem]"></p>
+                </div>
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
+                    <button type="button" id="rename-location-cancel-btn" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-600 font-semibold hover:bg-gray-50 transition">ביטול</button>
+                    <button type="submit" id="rename-location-save-btn" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">שמור שם חדש</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
 
     <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
@@ -635,6 +737,8 @@
         let isSavingCheckIn = false;
         let liveStatusTimeoutId = null;
         let waitingSyncHideTimeoutId = null;
+        let renameLocationPendingId = null;
+        let isRenamingLocation = false;
 
         // --- Firebase State ---
         let firebaseAppInstance = null;
@@ -699,6 +803,22 @@
         const confirmArrivalBtn = document.getElementById('confirm-arrival-btn');
         const denyArrivalBtn = document.getElementById('deny-arrival-btn');
 
+        // Intel Modal
+        const intelModal = document.getElementById('intel-modal');
+        const intelModalCloseBtn = document.getElementById('intel-modal-close-btn');
+        const intelModalTitle = document.getElementById('intel-modal-title');
+        const intelModalBody = document.getElementById('intel-modal-body');
+        const intelModalSources = document.getElementById('intel-modal-sources');
+
+        // Rename Location Modal
+        const renameLocationModal = document.getElementById('rename-location-modal');
+        const renameLocationForm = document.getElementById('rename-location-form');
+        const renameLocationInput = document.getElementById('rename-location-input');
+        const renameLocationError = document.getElementById('rename-location-error');
+        const renameLocationCancelBtn = document.getElementById('rename-location-cancel-btn');
+        const renameLocationSaveBtn = document.getElementById('rename-location-save-btn');
+        const renameLocationCloseBtn = document.getElementById('rename-location-close-btn');
+
         // --- 0. Initialize App ---
         async function initApp() {
             initMap();
@@ -718,6 +838,46 @@
             cancelCheckInBtn.addEventListener('click', () => { void finishCheckIn(false); }); // Don't save
             manualFinishBtn.addEventListener('click', () => { void finishCheckIn(true); }); // Save
             closeSuccessBtn.addEventListener('click', () => successMessage.classList.add('hidden'));
+
+            if (intelModalCloseBtn) {
+                intelModalCloseBtn.addEventListener('click', closeIntelModal);
+            }
+
+            if (intelModal) {
+                intelModal.addEventListener('click', (event) => {
+                    if (event.target === intelModal) {
+                        closeIntelModal();
+                    }
+                });
+            }
+
+            if (renameLocationCancelBtn) {
+                renameLocationCancelBtn.addEventListener('click', () => closeRenameLocationModal());
+            }
+
+            if (renameLocationCloseBtn) {
+                renameLocationCloseBtn.addEventListener('click', () => closeRenameLocationModal());
+            }
+
+            if (renameLocationModal) {
+                renameLocationModal.addEventListener('click', (event) => {
+                    if (event.target === renameLocationModal) {
+                        closeRenameLocationModal();
+                    }
+                });
+            }
+
+            if (renameLocationForm) {
+                renameLocationForm.addEventListener('submit', handleRenameLocationSubmit);
+            }
+
+            if (renameLocationInput) {
+                renameLocationInput.addEventListener('input', () => {
+                    if (renameLocationError) {
+                        renameLocationError.textContent = '';
+                    }
+                });
+            }
 
             // Arrival Confirmation Listeners
             confirmArrivalBtn.addEventListener('click', handleConfirmArrival);
@@ -949,7 +1109,7 @@
 
         function showLocationCard(name, id) {
             if (!targetDetailsCard) return;
-            const locationData = getLocationFromCache(id) || { name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords) };
+            const locationData = getLocationFromCache(id) || { id, name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords), intel: null };
 
             const avgTimeDisplay = locationData.totalCheckIns > 0
                 ? formatDurationWithUnits(locationData.avgWaitSeconds)
@@ -966,6 +1126,14 @@
             const weeklySummaryHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
                 variant: 'app',
                 emptyMessage: 'אין עדיין נתונים שבועיים עבור מיקום זה.'
+            });
+
+            const hasIntel = hasIntelData(locationData.intel);
+            const intelPreviewHtml = renderIntelPreviewHtml(locationData.intel, {
+                emptyMessage: 'היו הראשונים לקבל סקירה למיקום זה באמצעות Gemini כאשר תבצעו צ\'ק-אין.',
+                textClass: 'text-xs text-gray-500 mt-2',
+                summaryClass: 'text-sm text-blue-900/90 leading-relaxed',
+                maxLength: 220
             });
 
             targetDetailsCard.innerHTML = `
@@ -997,6 +1165,18 @@
                     <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
                     ${weeklySummaryHtml}
                 </div>
+                <div class="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-4">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h4 class="text-sm font-semibold text-blue-900">סקירת יעד</h4>
+                            <p class="text-xs text-blue-700 opacity-80">מידע תמציתי לביקור חכם</p>
+                        </div>
+                        ${hasIntel ? `<button type="button" class="open-intel-modal-btn text-xs font-semibold bg-blue-600 text-white rounded-full px-3 py-2 hover:bg-blue-700 transition">פתח סקירה מלאה</button>` : ''}
+                    </div>
+                    <div class="mt-3 bg-white rounded-xl border border-blue-100/60 p-3 max-h-60 overflow-y-auto ${hasIntel ? 'intel-rich-text text-sm text-blue-900/90' : ''}">
+                        ${intelPreviewHtml}
+                    </div>
+                </div>
                 <button id="start-check-in-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-md hover:bg-green-700 transition">
                     התחל צ'ק-אין למקום
                 </button>
@@ -1007,6 +1187,13 @@
             const closeBtn = document.getElementById('close-location-card-btn');
             if (closeBtn) {
                 closeBtn.addEventListener('click', hideLocationCard);
+            }
+
+            const intelModalBtn = targetDetailsCard.querySelector('.open-intel-modal-btn');
+            if (intelModalBtn) {
+                intelModalBtn.addEventListener('click', () => {
+                    openIntelModal({ ...locationData, name });
+                });
             }
 
             // Animate card in
@@ -1036,8 +1223,9 @@
             waitingDistance.textContent = "...ממתין ל-GPS";
             waitingBearing.textContent = "...ממתין ל-GPS";
             gpsCountdownEl.textContent = "";
-            infoResult.textContent = "";
-            infoSources.textContent = "";
+            infoResult.innerHTML = "";
+            infoSources.innerHTML = "";
+            infoSources.classList.add('hidden');
             infoErrorEl.textContent = "";
             infoLoading.classList.remove('hidden');
 
@@ -1401,6 +1589,163 @@
             }
         }
 
+        async function persistLocationIntel(id, intelRecord, options = {}) {
+            if (!firestoreDb || !id || !intelRecord) {
+                return null;
+            }
+
+            const sanitizedText = typeof intelRecord.text === 'string' ? intelRecord.text : '';
+            const sanitizedHtml = typeof intelRecord.html === 'string' && intelRecord.html.trim().length > 0
+                ? intelRecord.html
+                : formatIntelTextToHtml(sanitizedText);
+            const sanitizedSources = Array.isArray(intelRecord.sources)
+                ? intelRecord.sources
+                    .map((source) => ({
+                        title: typeof source?.title === 'string' ? source.title.trim() : '',
+                        uri: typeof source?.uri === 'string' ? source.uri.trim() : ''
+                    }))
+                    .filter((source) => source.title && source.uri)
+                : [];
+            const sanitizedCoords = sanitizeCoords(options.coords);
+            const sanitizedName = typeof options.name === 'string' && options.name.trim().length > 0
+                ? options.name.trim()
+                : null;
+            const locale = typeof intelRecord.locale === 'string' && intelRecord.locale.trim().length > 0
+                ? intelRecord.locale
+                : 'he-IL';
+
+            const timestampSentinel = serverTimestamp();
+            let savedIntel = null;
+
+            await runTransaction(firestoreDb, async (transaction) => {
+                const locationRef = doc(firestoreDb, FIRESTORE_LOCATIONS_COLLECTION, id);
+                const snapshot = await transaction.get(locationRef);
+
+                if (snapshot.exists()) {
+                    const existingData = snapshot.data();
+
+                    if (existingData.intel && hasIntelData(existingData.intel)) {
+                        savedIntel = {
+                            text: typeof existingData.intel.text === 'string' ? existingData.intel.text : '',
+                            html: typeof existingData.intel.html === 'string' ? existingData.intel.html : '',
+                            sources: Array.isArray(existingData.intel.sources)
+                                ? existingData.intel.sources
+                                    .map((source) => ({
+                                        title: typeof source?.title === 'string' ? source.title : '',
+                                        uri: typeof source?.uri === 'string' ? source.uri : ''
+                                    }))
+                                    .filter((source) => source.title && source.uri)
+                                : [],
+                            locale: existingData.intel.locale || locale
+                        };
+                        return;
+                    }
+
+                    const updatePayload = {
+                        intel: {
+                            text: sanitizedText,
+                            html: sanitizedHtml,
+                            sources: sanitizedSources,
+                            locale,
+                            createdAt: timestampSentinel,
+                            updatedAt: timestampSentinel
+                        }
+                    };
+
+                    if (!existingData.name && sanitizedName) {
+                        updatePayload.name = sanitizedName;
+                    }
+
+                    if (!existingData.coords && sanitizedCoords) {
+                        updatePayload.coords = sanitizedCoords;
+                    }
+
+                    transaction.set(locationRef, updatePayload, { merge: true });
+                    savedIntel = {
+                        text: sanitizedText,
+                        html: sanitizedHtml,
+                        sources: sanitizedSources,
+                        locale
+                    };
+                } else {
+                    const newDocument = {
+                        name: sanitizedName || `מיקום ${id}`,
+                        coords: sanitizedCoords || null,
+                        totalCheckIns: 0,
+                        totalWaitSeconds: 0,
+                        avgWaitSeconds: 0,
+                        visits: [],
+                        intel: {
+                            text: sanitizedText,
+                            html: sanitizedHtml,
+                            sources: sanitizedSources,
+                            locale,
+                            createdAt: timestampSentinel,
+                            updatedAt: timestampSentinel
+                        },
+                        lastUpdatedAt: timestampSentinel
+                    };
+
+                    transaction.set(locationRef, newDocument, { merge: true });
+                    savedIntel = {
+                        text: sanitizedText,
+                        html: sanitizedHtml,
+                        sources: sanitizedSources,
+                        locale
+                    };
+                }
+            });
+
+            return savedIntel;
+        }
+
+        async function updateLocationName(id, newName) {
+            if (!firestoreDb) {
+                throw new Error('Firebase אינו מוכן.');
+            }
+
+            const trimmedName = typeof newName === 'string' ? newName.trim() : '';
+            if (!trimmedName) {
+                throw new Error('שם המיקום חייב להכיל לפחות תו אחד.');
+            }
+
+            const nowIso = new Date().toISOString();
+
+            await runTransaction(firestoreDb, async (transaction) => {
+                const locationRef = doc(firestoreDb, FIRESTORE_LOCATIONS_COLLECTION, id);
+                const snapshot = await transaction.get(locationRef);
+
+                if (snapshot.exists()) {
+                    transaction.update(locationRef, {
+                        name: trimmedName,
+                        lastUpdatedAt: serverTimestamp()
+                    });
+                } else {
+                    transaction.set(locationRef, {
+                        name: trimmedName,
+                        lastUpdatedAt: serverTimestamp()
+                    }, { merge: true });
+                }
+            });
+
+            const cached = getLocationFromCache(id);
+            if (cached) {
+                upsertLocationInCache(id, { ...cached, name: trimmedName, lastUpdatedAt: nowIso });
+            } else {
+                upsertLocationInCache(id, {
+                    id,
+                    name: trimmedName,
+                    coords: null,
+                    totalCheckIns: 0,
+                    totalWaitSeconds: 0,
+                    avgWaitSeconds: 0,
+                    visits: [],
+                    lastUpdatedAt: nowIso,
+                    intel: null
+                });
+            }
+        }
+
         function computeLocationStats(visits) {
             const safeVisits = Array.isArray(visits) ? visits : [];
             const totals = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
@@ -1678,6 +2023,7 @@
                 const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
                 const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
                 const currentDayLabel = DAY_NAMES_HE[dayIndex];
+                const hasIntel = hasIntelData(data.intel);
 
                 const hourlyChartHtml = renderHourlyChart(todaysHourly, hourIndex, {
                     variant: 'app',
@@ -1702,8 +2048,14 @@
                                 <p class="text-sm text-gray-600">סה"כ צ'ק-אינים: <span class="font-medium text-blue-600">${data.totalCheckIns}</span></p>
                             </div>
                             <div class="flex items-center gap-2 self-start">
+                                <button class="intel-details-btn text-sm font-semibold rounded-md px-3 py-2 transition ${hasIntel ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}" ${hasIntel ? '' : 'disabled'}>
+                                    סקירת יעד
+                                </button>
                                 <button class="toggle-details-btn text-sm bg-gray-100 text-gray-700 font-semibold py-2 px-3 rounded-md hover:bg-gray-200 transition" aria-expanded="false">
                                     הצג פרטים
+                                </button>
+                                <button type="button" class="rename-location-btn text-sm bg-amber-100 text-amber-700 font-semibold py-2 px-3 rounded-md hover:bg-amber-200 transition">
+                                    שינוי שם
                                 </button>
                                 <button class="goto-location-btn text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
                                     עבור למיקום
@@ -1757,6 +2109,22 @@
                     gotoBtn.addEventListener('click', (event) => {
                         event.stopPropagation();
                         openLocation();
+                    });
+                }
+
+                const intelBtn = el.querySelector('.intel-details-btn');
+                if (intelBtn && hasIntel) {
+                    intelBtn.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        openIntelModal({ ...data, id });
+                    });
+                }
+
+                const renameBtn = el.querySelector('.rename-location-btn');
+                if (renameBtn) {
+                    renameBtn.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        openRenameLocationModal(id);
                     });
                 }
 
@@ -1851,6 +2219,14 @@
 
                 const locationName = data.name || `מיקום (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
 
+                marker.bindTooltip(locationName, {
+                    permanent: true,
+                    direction: 'top',
+                    offset: [0, -4],
+                    opacity: 1,
+                    className: 'map-location-label'
+                });
+
                 marker.on('click', () => {
                     if (locationNameInput) {
                         locationNameInput.value = locationName;
@@ -1884,6 +2260,362 @@
             });
         }
 
+        function hasIntelData(intel) {
+            if (!intel || typeof intel !== 'object') {
+                return false;
+            }
+
+            const html = typeof intel.html === 'string' ? intel.html.trim() : '';
+            const text = typeof intel.text === 'string' ? intel.text.trim() : '';
+            return html.length > 0 || text.length > 0;
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatIntelTextToHtml(text) {
+            if (typeof text !== 'string') {
+                return '';
+            }
+
+            const lines = text.split(/\r?\n/).map((line) => line.trim());
+            const chunks = [];
+            let listBuffer = [];
+
+            const flushList = () => {
+                if (listBuffer.length > 0) {
+                    chunks.push(`<ul>${listBuffer.join('')}</ul>`);
+                    listBuffer = [];
+                }
+            };
+
+            for (const line of lines) {
+                if (!line) {
+                    flushList();
+                    continue;
+                }
+
+                const bulletMatch = line.match(/^([\-*•])\s*(.+)$/);
+                if (bulletMatch) {
+                    const [, , content] = bulletMatch;
+                    listBuffer.push(`<li>${escapeHtml(content)}</li>`);
+                    continue;
+                }
+
+                flushList();
+
+                const numberedMatch = line.match(/^(\d+)[\.)]\s*(.+)$/);
+                if (numberedMatch) {
+                    const [, index, content] = numberedMatch;
+                    chunks.push(`<p><strong>${escapeHtml(index)}.</strong> ${escapeHtml(content)}</p>`);
+                    continue;
+                }
+
+                const colonIndex = line.indexOf(':');
+                if (colonIndex > 0 && colonIndex < line.length - 1) {
+                    const title = escapeHtml(line.slice(0, colonIndex));
+                    const body = escapeHtml(line.slice(colonIndex + 1).trim());
+                    chunks.push(`<p><strong>${title}:</strong> ${body}</p>`);
+                } else {
+                    chunks.push(`<p>${escapeHtml(line)}</p>`);
+                }
+            }
+
+            flushList();
+
+            return chunks.join('');
+        }
+
+        function getIntelHtml(intel) {
+            if (!intel || typeof intel !== 'object') {
+                return '';
+            }
+
+            if (typeof intel.html === 'string' && intel.html.trim().length > 0) {
+                return intel.html.trim();
+            }
+
+            if (typeof intel.text === 'string' && intel.text.trim().length > 0) {
+                return formatIntelTextToHtml(intel.text);
+            }
+
+            return '';
+        }
+
+        function getIntelTextContent(intel) {
+            if (!intel || typeof intel !== 'object') {
+                return '';
+            }
+
+            if (typeof intel.text === 'string' && intel.text.trim().length > 0) {
+                return intel.text.trim();
+            }
+
+            if (typeof intel.html === 'string' && intel.html.trim().length > 0) {
+                return intel.html
+                    .replace(/<br\s*\/?>/gi, '\n')
+                    .replace(/<li[^>]*>/gi, '\n')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            }
+
+            return '';
+        }
+
+        function getIntelSummaryText(intel, options = {}) {
+            const limit = Math.max(1, options.sentences ?? 2);
+            const maxChars = Math.max(60, options.maxLength ?? 320);
+            const textContent = getIntelTextContent(intel);
+
+            if (!textContent) {
+                return '';
+            }
+
+            const normalized = textContent.replace(/\s+/g, ' ').trim();
+            if (!normalized) {
+                return '';
+            }
+
+            const sentences = normalized.split(/(?<=[.!?\u05be\u2022])\s+/).filter(Boolean);
+            let summary = sentences.slice(0, limit).join(' ');
+
+            if (!summary) {
+                summary = normalized;
+            }
+
+            if (summary.length > maxChars) {
+                return `${summary.slice(0, maxChars).trim()}…`;
+            }
+
+            return summary;
+        }
+
+        function renderIntelPreviewHtml(intel, options = {}) {
+            const summary = getIntelSummaryText(intel, options);
+            if (!summary) {
+                const emptyMessage = options.emptyMessage || '';
+                if (!emptyMessage) {
+                    return '';
+                }
+                const textClass = options.textClass || 'text-sm text-gray-500';
+                return `<p class="${textClass}">${emptyMessage}</p>`;
+            }
+
+            const summaryClass = options.summaryClass || options.textClass || 'text-sm text-blue-900/90 leading-relaxed';
+            return `<p class="${summaryClass}">${escapeHtml(summary)}</p>`;
+        }
+
+        function renderIntelIntoContainer(container, intel, options = {}) {
+            if (!container) {
+                return;
+            }
+
+            const html = getIntelHtml(intel);
+            if (html) {
+                container.innerHTML = html;
+                container.classList.remove('hidden');
+                return;
+            }
+
+            container.innerHTML = options.emptyMessage
+                ? `<p class="${options.emptyClass || 'text-sm text-blue-100/80'}">${escapeHtml(options.emptyMessage)}</p>`
+                : '';
+
+            if (options.hideWhenEmpty) {
+                container.classList.add('hidden');
+            }
+        }
+
+        function renderIntelSources(container, sources, options = {}) {
+            if (!container) {
+                return;
+            }
+
+            const safeSources = Array.isArray(sources)
+                ? sources
+                    .map((source) => ({
+                        title: typeof source?.title === 'string' ? source.title.trim() : '',
+                        uri: typeof source?.uri === 'string' ? source.uri.trim() : ''
+                    }))
+                    .filter((source) => source.title && source.uri)
+                : [];
+
+            if (safeSources.length === 0) {
+                container.innerHTML = '';
+                container.classList.add('hidden');
+                return;
+            }
+
+            const linkClass = options.linkClass || 'text-blue-300 hover:text-blue-100 underline-offset-2 hover:underline';
+            const title = options.title || 'מקורות:';
+            const links = safeSources
+                .map((source) => `<a href="${source.uri}" target="_blank" rel="noopener" class="${linkClass}">${escapeHtml(source.title)}</a>`)
+                .join('<span class="text-blue-200/40">•</span>');
+
+            container.innerHTML = `<div class="flex flex-wrap items-center gap-2"><span class="font-semibold">${escapeHtml(title)}</span>${links}</div>`;
+            container.classList.remove('hidden');
+        }
+
+        function setRenameModalLoading(isLoading) {
+            if (renameLocationSaveBtn) {
+                renameLocationSaveBtn.disabled = isLoading;
+                if (isLoading) {
+                    renameLocationSaveBtn.innerHTML = `<span class="flex items-center justify-center gap-2"><span class="spinner w-4 h-4 border-2 rounded-full"></span><span>שומר...</span></span>`;
+                } else {
+                    renameLocationSaveBtn.innerHTML = 'שמור שם חדש';
+                }
+            }
+
+            if (renameLocationCancelBtn) {
+                renameLocationCancelBtn.disabled = isLoading;
+                renameLocationCancelBtn.classList.toggle('opacity-60', isLoading);
+            }
+        }
+
+        function openRenameLocationModal(locationId) {
+            if (!renameLocationModal || !renameLocationInput) {
+                return;
+            }
+
+            const cached = getLocationFromCache(locationId);
+
+            renameLocationPendingId = locationId;
+            setRenameModalLoading(false);
+
+            renameLocationModal.classList.remove('hidden');
+            renameLocationModal.setAttribute('aria-hidden', 'false');
+
+            const currentName = cached?.name || '';
+            renameLocationInput.value = currentName;
+            if (renameLocationError) {
+                renameLocationError.textContent = '';
+            }
+
+            window.setTimeout(() => {
+                if (renameLocationInput) {
+                    renameLocationInput.focus({ preventScroll: true });
+                    renameLocationInput.setSelectionRange(0, renameLocationInput.value.length);
+                }
+            }, 0);
+        }
+
+        function closeRenameLocationModal() {
+            if (!renameLocationModal) {
+                return;
+            }
+
+            renameLocationPendingId = null;
+            isRenamingLocation = false;
+            setRenameModalLoading(false);
+
+            if (renameLocationForm) {
+                renameLocationForm.reset();
+            }
+
+            if (renameLocationError) {
+                renameLocationError.textContent = '';
+            }
+
+            renameLocationModal.classList.add('hidden');
+            renameLocationModal.setAttribute('aria-hidden', 'true');
+        }
+
+        async function handleRenameLocationSubmit(event) {
+            event.preventDefault();
+
+            if (isRenamingLocation) {
+                return;
+            }
+
+            if (!renameLocationInput) {
+                return;
+            }
+
+            const newName = renameLocationInput.value.trim();
+            if (!newName) {
+                if (renameLocationError) {
+                    renameLocationError.textContent = 'אנא הזינו שם תקין למיקום.';
+                }
+                return;
+            }
+
+            if (!renameLocationPendingId) {
+                if (renameLocationError) {
+                    renameLocationError.textContent = 'אירעה שגיאה בזיהוי המיקום לעריכה.';
+                }
+                return;
+            }
+
+            isRenamingLocation = true;
+            setRenameModalLoading(true);
+            if (renameLocationError) {
+                renameLocationError.textContent = '';
+            }
+
+            try {
+                pulseLiveStatus('send', 'מעדכן שם המיקום...');
+                await updateLocationName(renameLocationPendingId, newName);
+                pulseLiveStatus('receive', 'שם המיקום עודכן');
+
+                if (currentLocationId === renameLocationPendingId) {
+                    targetName = newName;
+                    if (locationNameInput) {
+                        locationNameInput.value = newName;
+                    }
+                    if (waitingLocationName) {
+                        waitingLocationName.textContent = newName;
+                    }
+                    if (targetDetailsCard && targetDetailsCard.getAttribute('aria-hidden') === 'false') {
+                        showLocationCard(newName, currentLocationId);
+                    }
+                }
+
+                closeRenameLocationModal();
+            } catch (error) {
+                console.error('Failed to rename location', error);
+                if (renameLocationError) {
+                    renameLocationError.textContent = error?.message || 'אירעה שגיאה בעת שמירת השם החדש.';
+                }
+            } finally {
+                isRenamingLocation = false;
+                setRenameModalLoading(false);
+            }
+        }
+
+        function openIntelModal(location = {}) {
+            if (!intelModal || !intelModalBody || !intelModalTitle) {
+                return;
+            }
+
+            intelModalTitle.textContent = location.name || 'סקירת יעד';
+            renderIntelIntoContainer(intelModalBody, location.intel, {
+                emptyMessage: 'עדיין אין סקירה שמורה למיקום זה.',
+                emptyClass: 'text-sm text-blue-100/70'
+            });
+            renderIntelSources(intelModalSources, location.intel?.sources, {
+                linkClass: 'text-blue-200 hover:text-white underline-offset-4 hover:underline'
+            });
+
+            intelModal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+        }
+
+        function closeIntelModal() {
+            if (!intelModal) {
+                return;
+            }
+
+            intelModal.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+        }
+
         // --- 9. Gemini API ---
         async function callGeminiApi(payload) {
             const apiKey = GEMINI_API_KEY; // API key is handled by the environment
@@ -1915,9 +2647,18 @@
             if (!targetCoords) return;
 
             infoLoading.classList.remove('hidden');
-            infoResult.textContent = "";
-            infoSources.textContent = "";
+            infoResult.innerHTML = "";
+            infoSources.innerHTML = "";
+            infoSources.classList.add('hidden');
             infoErrorEl.textContent = "";
+
+            const cachedLocation = getLocationFromCache(currentLocationId);
+            if (hasIntelData(cachedLocation?.intel)) {
+                renderIntelIntoContainer(infoResult, cachedLocation.intel);
+                renderIntelSources(infoSources, cachedLocation.intel.sources);
+                infoLoading.classList.add('hidden');
+                return;
+            }
 
             // --- API Key Check ---
             if (!GEMINI_API_KEY) {
@@ -1927,35 +2668,67 @@
             }
             // --- End Check ---
 
-            const userQuery = `What is at latitude ${targetCoords.lat} and longitude ${targetCoords.lon}? If it's a place, tell me about it. If it's not a known place, describe the area. Keep it to one short paragraph. (Context: Target name is "${targetName}")`;
-            
+            const prettyName = targetName || cachedLocation?.name || 'המיקום';
+            const userQuery = `הכן תגובה תמציתית בעברית עבור המיקום "${prettyName}" שבקואורדינטות ${targetCoords.lat}, ${targetCoords.lon}. שמור על הפורמט הבא:\nתקציר: משפט אחד עד שניים בלבד עם המידע החשוב ביותר למבקר.\nעיקרי מידע:\n- מאפיין חשוב או רקע קצר (אם ידוע).\n- טיפ ביקור פרקטי (אם רלוונטי).\n- שעות פעילות או זמינות (אם יש מידע).\nהימנע מחזרות או מילים מיותרות.`;
+
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
                 tools: [{ "google_search": {} }],
                 systemInstruction: {
-                    parts: [{ text: "You are an intelligence operative providing a concise briefing. Be informative and direct." }]
+                    parts: [{ text: "הנך מדריך שטח ישראלי. השב תמיד בעברית מודרנית, ברורה ומכבדת. שמור על טון אינפורמטיבי, הימנע מטקסט שיווקי, ועמוד במגבלת אורך קצרה. תמיד התחל בסעיף \"תקציר\" בן משפט אחד עד שניים, ואחריו רשימת נקודות ממוקדות (עד שלוש). אם אין מידע עבור סעיף מסוים, ציין \"לא ידוע\" במקום להשאיר ריק." }]
                 },
             };
 
             try {
                 const result = await callGeminiApi(payload);
-                console.log("Gemini API Result:", result); // Added for debugging
+                console.log("Gemini API Result:", result);
                 const candidate = result.candidates?.[0];
-                
+
                 if (candidate && candidate.content?.parts?.[0]?.text) {
-                    infoResult.textContent = candidate.content.parts[0].text;
-                    
-                    // Display sources
+                    const contentText = candidate.content.parts[0].text;
                     const groundingMetadata = candidate.groundingMetadata;
-                    if (groundingMetadata && groundingMetadata.groundingAttributions) {
-                        const sources = groundingMetadata.groundingAttributions
-                            .map(attr => attr.web?.title && attr.web?.uri ? { title: attr.web.title, uri: attr.web.uri } : null)
-                            .filter(Boolean); // Remove nulls
-                        
-                        if (sources.length > 0) {
-                            infoSources.innerHTML = '<strong>מקורות:</strong> ' + sources
-                                .map(s => `<a href="${s.uri}" target="_blank" class="text-blue-300 hover:underline">${s.title}</a>`)
-                                .join(', ');
+                    const sources = groundingMetadata && groundingMetadata.groundingAttributions
+                        ? groundingMetadata.groundingAttributions
+                            .map((attr) => (attr.web?.title && attr.web?.uri ? { title: attr.web.title, uri: attr.web.uri } : null))
+                            .filter(Boolean)
+                        : [];
+
+                    const intelRecord = {
+                        text: contentText,
+                        html: formatIntelTextToHtml(contentText),
+                        sources,
+                        locale: 'he-IL'
+                    };
+
+                    renderIntelIntoContainer(infoResult, intelRecord, {
+                        emptyMessage: 'לא התקבל תוכן מתאים מהשירות.'
+                    });
+                    renderIntelSources(infoSources, intelRecord.sources);
+
+                    if (currentLocationId) {
+                        const coordsForIntel = sanitizeCoords(targetCoords);
+                        try {
+                            const storedIntel = await persistLocationIntel(currentLocationId, intelRecord, {
+                                name: prettyName,
+                                coords: coordsForIntel
+                            }) || intelRecord;
+
+                            const baseData = cachedLocation || {
+                                id: currentLocationId,
+                                name: prettyName,
+                                coords: coordsForIntel,
+                                totalCheckIns: 0,
+                                totalWaitSeconds: 0,
+                                avgWaitSeconds: 0,
+                                visits: []
+                            };
+
+                            upsertLocationInCache(currentLocationId, {
+                                ...baseData,
+                                intel: storedIntel
+                            });
+                        } catch (persistError) {
+                            console.warn('Failed to persist Gemini intel', persistError);
                         }
                     }
                 } else {
