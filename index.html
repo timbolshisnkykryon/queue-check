@@ -90,6 +90,65 @@
             line-height: 1.4;
         }
 
+        .visited-location-popup .leaflet-popup-content-wrapper {
+            border-radius: 0.75rem;
+            padding: 0;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
+        }
+
+        .visited-location-popup .leaflet-popup-tip {
+            background: #ffffff;
+        }
+
+        .visited-location-popup .leaflet-popup-content {
+            margin: 0;
+            min-width: unset;
+        }
+
+        .visited-location-popup__content {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            padding: 0.85rem 1rem;
+            direction: rtl;
+            text-align: right;
+        }
+
+        .visited-location-popup__title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #1f2937;
+            margin: 0;
+            text-align: right;
+        }
+
+        .visited-location-popup__stats {
+            display: grid;
+            gap: 0.5rem;
+            margin: 0;
+            text-align: right;
+        }
+
+        .visited-location-popup__stats div {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+            color: #1f2937;
+        }
+
+        .visited-location-popup__stats dt {
+            font-weight: 500;
+            color: #1f2937;
+        }
+
+        .visited-location-popup__stats dd {
+            margin: 0;
+            font-weight: 600;
+            color: #2563eb;
+        }
+
         .map-location-label {
             background: rgba(37, 99, 235, 0.92);
             color: #fff;
@@ -496,7 +555,7 @@
         </nav>
 
         <!-- Main Content -->
-        <main class="flex-1 relative overflow-hidden min-h-0">
+        <main class="flex-1 relative overflow-visible min-h-0">
             
             <!-- Map Tab -->
             <div id="tab-content-map" class="tab-content active h-full w-full">
