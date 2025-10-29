@@ -1,5 +1,62 @@
 export const MAX_VISIT_HISTORY = 20;
 
+function normalizeTimestamp(value) {
+    if (!value) return null;
+
+    if (typeof value.toDate === 'function') {
+        try {
+            return value.toDate().toISOString();
+        } catch (error) {
+            return null;
+        }
+    }
+
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    }
+
+    return null;
+}
+
+function normalizeIntelRecord(rawIntel) {
+    if (!rawIntel || typeof rawIntel !== 'object') {
+        return null;
+    }
+
+    const text = typeof rawIntel.text === 'string' ? rawIntel.text : '';
+    const html = typeof rawIntel.html === 'string' ? rawIntel.html : '';
+    const locale = typeof rawIntel.locale === 'string' ? rawIntel.locale : null;
+    const sources = Array.isArray(rawIntel.sources)
+        ? rawIntel.sources
+            .map((source) => ({
+                title: typeof source?.title === 'string' ? source.title : '',
+                uri: typeof source?.uri === 'string' ? source.uri : ''
+            }))
+            .filter((source) => source.title && source.uri)
+        : [];
+
+    const createdAt = normalizeTimestamp(rawIntel.createdAt);
+    const updatedAt = normalizeTimestamp(rawIntel.updatedAt);
+
+    if (!text && !html && sources.length === 0) {
+        return null;
+    }
+
+    return {
+        text: text || null,
+        html: html || null,
+        sources,
+        locale,
+        createdAt,
+        updatedAt
+    };
+}
+
 export function sanitizeCoords(coords) {
     if (!coords || typeof coords !== 'object') {
         return null;
@@ -68,6 +125,8 @@ export function normalizeLocationRecord(id, data = {}, options = {}) {
         ? data.visits.map((entry) => normalizeVisitEntry(entry, options)).filter(Boolean)
         : [];
 
+    const intel = normalizeIntelRecord(data.intel);
+
     return {
         id,
         name: typeof data.name === 'string' && data.name.trim().length > 0 ? data.name : 'מיקום ללא שם',
@@ -76,7 +135,8 @@ export function normalizeLocationRecord(id, data = {}, options = {}) {
         totalWaitSeconds: Number.isFinite(Number(data.totalWaitSeconds)) ? Number(data.totalWaitSeconds) : 0,
         avgWaitSeconds: Number.isFinite(Number(data.avgWaitSeconds)) ? Number(data.avgWaitSeconds) : 0,
         visits: visits.slice(0, options.maxVisitHistory ?? MAX_VISIT_HISTORY),
-        lastUpdatedAt: data.lastUpdatedAt ?? null
+        lastUpdatedAt: data.lastUpdatedAt ?? null,
+        intel
     };
 }
 

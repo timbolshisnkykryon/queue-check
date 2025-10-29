@@ -51,13 +51,29 @@ function testNormalizeLocationRecord() {
         visits: [
             { waitSeconds: 200, timestamp: '2024-01-02T10:00:00Z', dayOfWeek: 2, hourOfDay: 10 },
             { waitSeconds: 'bad' }
-        ]
+        ],
+        intel: {
+            text: 'כותרת: מקום בדיקה\n- מאפיין ראשון\n- מאפיין שני',
+            html: '',
+            sources: [
+                { title: 'אתר העירייה', uri: 'https://example.org' },
+                { title: '', uri: 'https://invalid' }
+            ],
+            createdAt: new Date('2024-01-01T00:00:00Z'),
+            updatedAt: { toDate: () => new Date('2024-01-02T12:00:00Z') }
+        }
     });
 
     assert.equal(record.id, 'loc1');
     assert.equal(record.visits.length, 1);
     assert.equal(record.totalCheckIns, 5);
     assert.equal(record.avgWaitSeconds, 100);
+    assert.ok(record.intel, 'intel should be normalized');
+    assert.equal(record.intel.sources.length, 1);
+    assert.equal(record.intel.sources[0].title, 'אתר העירייה');
+    assert.equal(record.intel.locale, null);
+    assert.equal(record.intel.createdAt, '2024-01-01T00:00:00.000Z');
+    assert.equal(record.intel.updatedAt, '2024-01-02T12:00:00.000Z');
 }
 
 function testPrepareCheckInUpdate() {
