@@ -81,6 +81,7 @@ export function initializeApplication(context) {
         waitingDistance,
         waitingBearing,
         gpsCountdownEl,
+        miniMapEl,
         infoLoading,
         infoResult,
         infoSources,
@@ -557,6 +558,7 @@ function showLocationCard(name, id) {
     `;
 
     // Add event listener to the new button
+    const closeBtn = targetDetailsCard.querySelector('#close-location-card-btn');
     document.getElementById('start-check-in-btn').onclick = startCheckIn;
     if (closeBtn) {
         closeBtn.addEventListener('click', hideLocationCard);
