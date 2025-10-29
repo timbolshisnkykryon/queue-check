@@ -1331,29 +1331,38 @@
 
                 const el = document.createElement('div');
                 el.className = "bg-white p-4 rounded-lg shadow-md border";
+                const safeIdSuffix = String(id ?? data.name ?? 'loc').replace(/[^a-zA-Z0-9_-]/g, '') || Math.random().toString(36).slice(2);
+                const detailsId = `location-details-${safeIdSuffix}`;
                 el.innerHTML = `
                     <div class="flex flex-col gap-4">
                         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                            <div class="space-y-2">
+                            <div class="space-y-2 flex-1">
                                 <h3 class="font-semibold text-lg text-gray-800">${data.name}</h3>
                                 <p class="text-sm text-gray-600">זמן המתנה ממוצע: <span class="font-medium text-blue-600">${avgTimeDisplay}</span></p>
                                 <p class="text-sm text-gray-600">סה"כ צ'ק-אינים: <span class="font-medium text-blue-600">${data.totalCheckIns}</span></p>
                                 <p class="text-xs text-gray-500">שעה נוכחית (${currentDayLabel} · ${formatHourLabel(hourIndex)}): <span class="font-semibold text-blue-600">${currentHourStats.label}</span></p>
                             </div>
-                            <button class="goto-location-btn self-start text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
-                                עבור למיקום
-                            </button>
-                        </div>
-                        <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
-                            <div class="flex items-center justify-between text-xs sm:text-sm text-blue-900 font-semibold">
-                                <span>היום לפי שעות</span>
-                                <span>${currentHourStats.hasData ? currentHourStats.label : 'אין נתונים לשעה זו'}</span>
+                            <div class="flex flex-row sm:flex-col gap-2 shrink-0">
+                                <button class="goto-location-btn text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
+                                    עבור למיקום
+                                </button>
+                                <button type="button" class="toggle-details-btn text-sm bg-gray-100 text-gray-700 font-semibold py-2 px-3 rounded-md hover:bg-gray-200 transition" aria-expanded="false" aria-controls="${detailsId}">
+                                    הצג מידע
+                                </button>
                             </div>
-                            ${hourlyChartHtml}
                         </div>
-                        <div>
-                            <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
-                            ${weeklySummaryHtml}
+                        <div id="${detailsId}" class="location-details hidden flex flex-col gap-4">
+                            <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                                <div class="flex items-center justify-between text-xs sm:text-sm text-blue-900 font-semibold">
+                                    <span>היום לפי שעות</span>
+                                    <span>${currentHourStats.hasData ? currentHourStats.label : 'אין נתונים לשעה זו'}</span>
+                                </div>
+                                ${hourlyChartHtml}
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
+                                ${weeklySummaryHtml}
+                            </div>
                         </div>
                     </div>
                 `;
@@ -1365,6 +1374,17 @@
                     if (lat == null || lon == null) return;
                     selectLocation(lat, lon, data.name, id);
                 });
+
+                const detailsEl = el.querySelector(`#${detailsId}`);
+                const toggleBtn = el.querySelector('.toggle-details-btn');
+                if (detailsEl && toggleBtn) {
+                    toggleBtn.addEventListener('click', () => {
+                        const isHidden = detailsEl.classList.toggle('hidden');
+                        const isExpanded = !isHidden;
+                        toggleBtn.textContent = isExpanded ? 'הסתר מידע' : 'הצג מידע';
+                        toggleBtn.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+                    });
+                }
 
                 allLocationsList.appendChild(el);
             }
@@ -1424,7 +1444,10 @@
                 });
 
                 let popupContent = `
-                    <div dir="rtl" style="text-align: right; max-width: 260px;">
+                    <div dir="rtl" style="text-align: right; max-width: 260px; position: relative; padding-left: 1.5rem;">
+                        <button type="button" class="map-popup-close-btn" aria-label="סגירת חלון מידע" style="position: absolute; top: 0.25rem; left: 0.25rem; background: #e5e7eb; border: none; border-radius: 9999px; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: #1f2937; cursor: pointer;">
+                            ✕
+                        </button>
                         <div style="font-weight: 600; margin-bottom: 0.25rem; font-size: 0.95rem;">${data.name}</div>
                         <div style="font-size: 0.82rem;">צ'ק-אינים: <strong>${data.totalCheckIns}</strong></div>
                         <div style="font-size: 0.82rem;">זמן המתנה ממוצע: <strong>${averageWaitLabel}</strong></div>
@@ -1462,6 +1485,16 @@
                 popupContent += '</div>';
 
                 marker.bindPopup(popupContent);
+                marker.on('popupopen', (event) => {
+                    const popupEl = event.popup.getElement();
+                    if (!popupEl) return;
+                    const closeBtn = popupEl.querySelector('.map-popup-close-btn');
+                    if (closeBtn) {
+                        closeBtn.addEventListener('click', () => {
+                            map.closePopup();
+                        }, { once: true });
+                    }
+                });
             }
         }
 
