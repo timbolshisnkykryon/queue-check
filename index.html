@@ -568,9 +568,12 @@
         }
 
         function selectLocation(lat, lon, name, id = null) {
+            if (map) {
+                map.closePopup();
+            }
             targetCoords = { lat, lon };
             targetName = name;
-            
+
             // Generate a unique ID if one isn't provided
             currentLocationId = id || `loc_${lat.toFixed(6)}_${lon.toFixed(6)}`;
 
@@ -1358,28 +1361,35 @@
                 el.setAttribute('tabindex', '0');
                 el.setAttribute('role', 'button');
                 el.innerHTML = `
-                    <div class="flex flex-col gap-4">
+                    <div class="flex flex-col gap-3">
                         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                             <div class="space-y-2">
                                 <h3 class="font-semibold text-lg text-gray-800">${data.name}</h3>
                                 <p class="text-sm text-gray-600">זמן המתנה ממוצע: <span class="font-medium text-blue-600">${avgTimeDisplay}</span></p>
                                 <p class="text-sm text-gray-600">סה"כ צ'ק-אינים: <span class="font-medium text-blue-600">${data.totalCheckIns}</span></p>
-                                <p class="text-xs text-gray-500">שעה נוכחית (${currentDayLabel} · ${formatHourLabel(hourIndex)}): <span class="font-semibold text-blue-600">${currentHourStats.label}</span></p>
                             </div>
-                            <button class="goto-location-btn self-start text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
-                                עבור למיקום
-                            </button>
-                        </div>
-                        <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
-                            <div class="flex items-center justify-between text-xs sm:text-sm text-blue-900 font-semibold">
-                                <span>היום לפי שעות</span>
-                                <span>${currentHourStats.hasData ? currentHourStats.label : 'אין נתונים לשעה זו'}</span>
+                            <div class="flex items-center gap-2 self-start">
+                                <button class="toggle-details-btn text-sm bg-gray-100 text-gray-700 font-semibold py-2 px-3 rounded-md hover:bg-gray-200 transition" aria-expanded="false">
+                                    הצג פרטים
+                                </button>
+                                <button class="goto-location-btn text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
+                                    עבור למיקום
+                                </button>
                             </div>
-                            ${hourlyChartHtml}
                         </div>
-                        <div>
-                            <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
-                            ${weeklySummaryHtml}
+                        <div class="location-details hidden space-y-3">
+                            <p class="text-xs text-gray-500">שעה נוכחית (${currentDayLabel} · ${formatHourLabel(hourIndex)}): <span class="font-semibold text-blue-600">${currentHourStats.label}</span></p>
+                            <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                                <div class="flex items-center justify-between text-xs sm:text-sm text-blue-900 font-semibold">
+                                    <span>היום לפי שעות</span>
+                                    <span>${currentHourStats.hasData ? currentHourStats.label : 'אין נתונים לשעה זו'}</span>
+                                </div>
+                                ${hourlyChartHtml}
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
+                                ${weeklySummaryHtml}
+                            </div>
                         </div>
                     </div>
                 `;
@@ -1400,6 +1410,9 @@
                 });
 
                 el.addEventListener('keydown', (event) => {
+                    if (event.target.closest('button')) {
+                        return;
+                    }
                     if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
                         openLocation();
@@ -1411,6 +1424,30 @@
                     gotoBtn.addEventListener('click', (event) => {
                         event.stopPropagation();
                         openLocation();
+                    });
+                }
+
+                const detailsEl = el.querySelector('.location-details');
+                const toggleBtn = el.querySelector('.toggle-details-btn');
+                if (detailsEl && toggleBtn) {
+                    const setExpanded = (expanded) => {
+                        if (expanded) {
+                            detailsEl.classList.remove('hidden');
+                            toggleBtn.textContent = 'הסתר פרטים';
+                            toggleBtn.setAttribute('aria-expanded', 'true');
+                        } else {
+                            detailsEl.classList.add('hidden');
+                            toggleBtn.textContent = 'הצג פרטים';
+                            toggleBtn.setAttribute('aria-expanded', 'false');
+                        }
+                    };
+
+                    setExpanded(false);
+
+                    toggleBtn.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        const expanded = toggleBtn.getAttribute('aria-expanded') === 'true';
+                        setExpanded(!expanded);
                     });
                 }
 
