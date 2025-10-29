@@ -391,6 +391,10 @@
         // --- Local Storage DB Key ---
         const LOCAL_DB_KEY = 'tfosMakomDB';
 
+        const HOURS_PER_DAY = 24;
+        const DAY_NAMES_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+        const SHORT_DAY_NAMES_HE = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
+
         // --- Element Refs ---
         const mainScreen = document.getElementById('main-screen');
         const waitingScreen = document.getElementById('waiting-screen');
@@ -589,23 +593,48 @@
 
         function showLocationCard(name, id) {
             const db = getDb();
-            const locationData = db[id] || { totalCheckIns: 0, avgWaitSeconds: 0 };
+            const locationData = db[id] || { totalCheckIns: 0, avgWaitSeconds: 0, visits: [] };
 
             const avgTimeDisplay = locationData.totalCheckIns > 0
-                ? `${formatDuration(locationData.avgWaitSeconds)} דקות`
+                ? formatDurationWithUnits(locationData.avgWaitSeconds)
                 : "אין עדיין מידע";
 
+            const stats = computeLocationStats(locationData.visits);
+            const { dayIndex, hourIndex } = getCurrentTimeContext();
+            const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
+            const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
+            const hourlyChartHtml = renderHourlyChart(todaysHourly, hourIndex, {
+                variant: 'app',
+                emptyMessage: 'אין עדיין נתונים לשעות היום במיקום זה.'
+            });
+            const weeklySummaryHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
+                variant: 'app',
+                emptyMessage: 'אין עדיין נתונים שבועיים עבור מיקום זה.'
+            });
+
             targetDetailsCard.innerHTML = `
-                <h3 class="font-bold text-lg mb-2">${name}</h3>
-                <div class="flex justify-between text-sm mb-4">
-                    <div class="text-gray-600">
-                        <span class="font-semibold">זמן המתנה ממוצע:</span>
-                        <span>${avgTimeDisplay}</span>
+                <h3 class="font-bold text-lg mb-2 text-gray-900">${name}</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
+                    <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
+                        <div class="font-semibold text-gray-700">זמן המתנה ממוצע</div>
+                        <div class="text-blue-600 font-semibold">${avgTimeDisplay}</div>
                     </div>
-                    <div class="text-gray-600">
-                        <span class="font-semibold">צ'ק-אינים:</span>
-                        <span>${locationData.totalCheckIns}</span>
+                    <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
+                        <div class="font-semibold text-gray-700">סה"כ צ'ק-אינים</div>
+                        <div class="text-blue-600 font-semibold">${locationData.totalCheckIns}</div>
                     </div>
+                    <div class="bg-blue-50 rounded-lg p-3 text-blue-900 sm:col-span-2">
+                        <div class="font-semibold">שעה נוכחית (${DAY_NAMES_HE[dayIndex]} · ${formatHourLabel(hourIndex)})</div>
+                        <div>${currentHourStats.label}</div>
+                    </div>
+                </div>
+                <div class="bg-white border border-blue-100 rounded-lg p-3 mb-4">
+                    <h4 class="text-sm font-semibold text-gray-700">ממוצע לפי שעה (היום)</h4>
+                    ${hourlyChartHtml}
+                </div>
+                <div class="bg-white border border-gray-200 rounded-lg p-3 mb-4">
+                    <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
+                    ${weeklySummaryHtml}
                 </div>
                 <button id="start-check-in-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-md hover:bg-green-700 transition">
                     התחל צ'ק-אין למקום
@@ -924,10 +953,81 @@
         }
 
         // --- 7. Local Storage DB ---
+        function normalizeDatabaseSchema(db) {
+            if (!db || typeof db !== 'object') return { db, mutated: false };
+
+            let mutated = false;
+
+            for (const location of Object.values(db)) {
+                if (!location || typeof location !== 'object') continue;
+
+                if (!Array.isArray(location.visits)) {
+                    location.visits = [];
+                    mutated = true;
+                    continue;
+                }
+
+                location.visits = location.visits
+                    .map((visit) => {
+                        if (!visit || typeof visit !== 'object') {
+                            mutated = true;
+                            return null;
+                        }
+
+                        const normalized = { ...visit };
+
+                        const numericWait = Number(normalized.waitSeconds);
+                        if (!Number.isFinite(numericWait) || numericWait < 0) {
+                            normalized.waitSeconds = 0;
+                            mutated = true;
+                        } else {
+                            normalized.waitSeconds = numericWait;
+                        }
+
+                        let parsedDate = null;
+                        if (normalized.timestamp) {
+                            const maybeDate = new Date(normalized.timestamp);
+                            if (!Number.isNaN(maybeDate.getTime())) {
+                                parsedDate = maybeDate;
+                                normalized.timestamp = maybeDate.toISOString();
+                            }
+                        }
+
+                        if (!parsedDate) {
+                            parsedDate = new Date();
+                            normalized.timestamp = parsedDate.toISOString();
+                            mutated = true;
+                        }
+
+                        if (!Number.isInteger(normalized.dayOfWeek) || normalized.dayOfWeek < 0 || normalized.dayOfWeek > 6) {
+                            normalized.dayOfWeek = parsedDate ? parsedDate.getDay() : Math.floor(Math.random() * 7);
+                            mutated = true;
+                        }
+
+                        if (!Number.isInteger(normalized.hourOfDay) || normalized.hourOfDay < 0 || normalized.hourOfDay > 23) {
+                            normalized.hourOfDay = parsedDate ? parsedDate.getHours() : Math.floor(Math.random() * HOURS_PER_DAY);
+                            mutated = true;
+                        }
+
+                        return normalized;
+                    })
+                    .filter(Boolean);
+            }
+
+            return { db, mutated };
+        }
+
         function getDb() {
             try {
                 const db = localStorage.getItem(LOCAL_DB_KEY);
-                return db ? JSON.parse(db) : {};
+                const parsed = db ? JSON.parse(db) : {};
+                const { mutated } = normalizeDatabaseSchema(parsed);
+
+                if (mutated) {
+                    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(parsed));
+                }
+
+                return parsed;
             } catch (e) {
                 console.error("Failed to parse local DB", e);
                 return {};
@@ -936,6 +1036,40 @@
 
         function saveDb(db) {
             localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db));
+        }
+
+        function getCurrentTimeContext(referenceDate = new Date()) {
+            return {
+                now: referenceDate,
+                dayIndex: referenceDate.getDay(),
+                hourIndex: referenceDate.getHours()
+            };
+        }
+
+        function formatHourLabel(hour) {
+            const normalized = Number.isInteger(hour) ? Math.min(Math.max(hour, 0), HOURS_PER_DAY - 1) : 0;
+            return `${normalized.toString().padStart(2, '0')}:00`;
+        }
+
+        function formatDurationWithUnits(seconds) {
+            if (!Number.isFinite(Number(seconds)) || seconds <= 0) {
+                return 'אין נתונים';
+            }
+
+            return `${formatDuration(seconds)} דקות`;
+        }
+
+        function getCurrentHourStats(hourlyData, hourIndex) {
+            if (!Array.isArray(hourlyData) || !Number.isInteger(hourIndex)) {
+                return { hasData: false, seconds: null, label: 'אין נתונים לשעה זו עדיין' };
+            }
+
+            const value = hourlyData[hourIndex];
+            if (Number.isFinite(value) && value > 0) {
+                return { hasData: true, seconds: value, label: formatDurationWithUnits(value) };
+            }
+
+            return { hasData: false, seconds: null, label: 'אין נתונים לשעה זו עדיין' };
         }
 
         function saveWaitTime(id, name, coords, waitSeconds) {
@@ -957,9 +1091,13 @@
                 locationData.visits = [];
             }
 
+            const { now, dayIndex, hourIndex } = getCurrentTimeContext();
+
             locationData.visits.unshift({
-                timestamp: new Date().toISOString(),
-                waitSeconds: waitSeconds
+                timestamp: now.toISOString(),
+                waitSeconds: waitSeconds,
+                dayOfWeek: dayIndex,
+                hourOfDay: hourIndex
             });
 
             // Keep only the most recent 20 visits to avoid unlimited growth
@@ -975,7 +1113,186 @@
                 renderAllLocations();
             }
         }
-        
+
+        function computeLocationStats(visits) {
+            const safeVisits = Array.isArray(visits) ? visits : [];
+            const totals = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
+            const counts = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
+
+            for (const visit of safeVisits) {
+                if (!visit || typeof visit !== 'object') continue;
+
+                const dayIndex = Number.isInteger(visit.dayOfWeek) ? visit.dayOfWeek : null;
+                const hourIndex = Number.isInteger(visit.hourOfDay) ? visit.hourOfDay : null;
+                const waitSeconds = Number(visit.waitSeconds);
+
+                if (dayIndex === null || hourIndex === null) continue;
+                if (dayIndex < 0 || dayIndex >= DAY_NAMES_HE.length) continue;
+                if (hourIndex < 0 || hourIndex >= HOURS_PER_DAY) continue;
+                if (!Number.isFinite(waitSeconds) || waitSeconds <= 0) continue;
+
+                totals[dayIndex][hourIndex] += waitSeconds;
+                counts[dayIndex][hourIndex] += 1;
+            }
+
+            const hourlyAverages = totals.map((dayTotals, dayIdx) =>
+                dayTotals.map((total, hourIdx) => {
+                    const count = counts[dayIdx][hourIdx];
+                    return count > 0 ? total / count : null;
+                })
+            );
+
+            const weeklyAverages = totals.map((dayTotals, dayIdx) => {
+                let total = 0;
+                let count = 0;
+                for (let hourIdx = 0; hourIdx < HOURS_PER_DAY; hourIdx += 1) {
+                    total += dayTotals[hourIdx];
+                    count += counts[dayIdx][hourIdx];
+                }
+                return count > 0 ? total / count : null;
+            });
+
+            return { hourlyAverages, weeklyAverages, counts };
+        }
+
+        function renderHourlyChart(hourlyData, highlightHour, options = {}) {
+            if (!Array.isArray(hourlyData) || hourlyData.length === 0) {
+                return options.variant === 'map'
+                    ? `<p style="margin-top:0.5rem; font-size:0.75rem; color:#6b7280;">${options.emptyMessage || 'אין עדיין נתונים עבור שעות היום.'}</p>`
+                    : `<p class="text-xs text-gray-500 mt-2">${options.emptyMessage || 'אין עדיין נתונים עבור שעות היום.'}</p>`;
+            }
+
+            const hasData = hourlyData.some((value) => Number.isFinite(value) && value > 0);
+            const variant = options.variant || 'app';
+            const emptyMessage = options.emptyMessage || 'אין עדיין נתונים עבור שעות היום.';
+
+            if (!hasData) {
+                return variant === 'map'
+                    ? `<p style="margin-top:0.5rem; font-size:0.75rem; color:#6b7280;">${emptyMessage}</p>`
+                    : `<p class="text-xs text-gray-500 mt-2">${emptyMessage}</p>`;
+            }
+
+            const baseHeight = options.height ?? (variant === 'map' ? 60 : 96);
+            const gap = options.gap ?? (variant === 'map' ? 4 : 4);
+            const effectiveMax = hourlyData.reduce((max, value) => (Number.isFinite(value) && value > max ? value : max), 0) || 1;
+
+            const barsHtml = hourlyData
+                .map((value, hourIdx) => {
+                    const safeValue = Number.isFinite(value) && value > 0 ? value : 0;
+                    const heightPx = Math.round((safeValue / effectiveMax) * baseHeight);
+                    const barHeight = safeValue > 0 ? Math.max(heightPx, 6) : 4;
+                    const isHighlight = hourIdx === highlightHour;
+                    const tooltipValue = safeValue > 0 ? formatDurationWithUnits(safeValue) : 'אין נתונים';
+
+                    if (variant === 'map') {
+                        const barColor = isHighlight ? '#2563eb' : '#93c5fd';
+                        const opacity = safeValue > 0 ? 1 : 0.4;
+                        return `<div style="flex:1; display:flex; align-items:flex-end;" title="${formatHourLabel(hourIdx)} · ${tooltipValue}"><div style="width:100%; height:${barHeight}px; background:${barColor}; border-radius:6px 6px 0 0; opacity:${opacity};"></div></div>`;
+                    }
+
+                    const barClass = isHighlight ? 'bg-blue-600' : 'bg-blue-300';
+                    const opacity = safeValue > 0 ? 1 : 0.35;
+                    return `<div class="flex-1 flex items-end" title="${formatHourLabel(hourIdx)} · ${tooltipValue}"><div class="${barClass} w-full rounded-t-md" style="height:${barHeight}px; opacity:${opacity};"></div></div>`;
+                })
+                .join('');
+
+            if (variant === 'map') {
+                const labels = options.hideLabels
+                    ? ''
+                    : `<div style="display:flex; justify-content:space-between; font-size:0.65rem; color:#4b5563; margin-top:0.25rem;"><span>00</span><span>12</span><span>23</span></div>`;
+                return `<div style="display:flex; align-items:flex-end; gap:${gap}px; height:${baseHeight}px; margin-top:0.5rem;">${barsHtml}</div>${labels}`;
+            }
+
+            const labels = options.hideLabels
+                ? ''
+                : `<div class="flex justify-between text-[0.65rem] text-gray-500 mt-1"><span>00</span><span>12</span><span>23</span></div>`;
+            return `<div class="flex items-end gap-1 w-full mt-2" style="height:${baseHeight}px;">${barsHtml}</div>${labels}`;
+        }
+
+        function renderWeeklySummary(weeklyData, highlightDay, options = {}) {
+            if (!Array.isArray(weeklyData) || weeklyData.length === 0) {
+                return options.variant === 'map'
+                    ? `<p style="margin-top:0.5rem; font-size:0.75rem; color:#6b7280;">${options.emptyMessage || 'אין עדיין נתונים שבועיים.'}</p>`
+                    : `<p class="text-xs text-gray-500 mt-2">${options.emptyMessage || 'אין עדיין נתונים שבועיים.'}</p>`;
+            }
+
+            const variant = options.variant || 'app';
+            const emptyMessage = options.emptyMessage || 'אין עדיין נתונים שבועיים.';
+            const hasData = weeklyData.some((value) => Number.isFinite(value) && value > 0);
+
+            if (!hasData) {
+                return variant === 'map'
+                    ? `<p style="margin-top:0.5rem; font-size:0.75rem; color:#6b7280;">${emptyMessage}</p>`
+                    : `<p class="text-xs text-gray-500 mt-2">${emptyMessage}</p>`;
+            }
+
+            if (options.compact) {
+                const itemsHtml = weeklyData
+                    .map((value, dayIdx) => {
+                        const highlight = dayIdx === highlightDay;
+                        const hasDayData = Number.isFinite(value) && value > 0;
+                        const minutes = hasDayData ? Math.round(value / 60) : null;
+                        const display = minutes !== null ? (minutes > 0 ? `${minutes}׳` : '<1׳') : '—';
+
+                        if (variant === 'map') {
+                            const background = highlight ? '#2563eb' : '#e5e7eb';
+                            const color = highlight ? '#ffffff' : '#1f2937';
+                            const opacity = hasDayData ? 1 : 0.6;
+                            return `<div style="flex:1; text-align:center; border-radius:0.6rem; padding:0.35rem 0.25rem; font-size:0.7rem; background:${background}; color:${color}; opacity:${opacity};">
+                                        <div style="font-weight:600;">${SHORT_DAY_NAMES_HE[dayIdx]}</div>
+                                        <div>${display}</div>
+                                    </div>`;
+                        }
+
+                        const baseClass = highlight ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700';
+                        const opacityClass = hasDayData ? '' : 'opacity-60';
+                        return `<div class="flex flex-col items-center justify-center rounded-lg px-2 py-2 text-xs sm:text-sm font-medium ${baseClass} ${opacityClass}">
+                                    <div>${SHORT_DAY_NAMES_HE[dayIdx]}</div>
+                                    <div class="mt-1">${display}</div>
+                                </div>`;
+                    })
+                    .join('');
+
+                if (variant === 'map') {
+                    return `<div style="display:flex; gap:4px; margin-top:0.5rem;">${itemsHtml}</div>`;
+                }
+
+                return `<div class="grid grid-cols-4 sm:grid-cols-7 gap-2 mt-2">${itemsHtml}</div>`;
+            }
+
+            const itemsHtml = weeklyData
+                .map((value, dayIdx) => {
+                    const highlight = dayIdx === highlightDay;
+                    const hasDayData = Number.isFinite(value) && value > 0;
+                    const label = DAY_NAMES_HE[dayIdx];
+                    const valueLabel = hasDayData ? formatDurationWithUnits(value) : 'אין נתונים';
+
+                    if (variant === 'map') {
+                        const background = highlight ? '#dbeafe' : '#f3f4f6';
+                        const color = highlight ? '#1d4ed8' : '#1f2937';
+                        const opacity = hasDayData ? 1 : 0.65;
+                        return `<div style="display:flex; justify-content:space-between; align-items:center; border-radius:0.75rem; padding:0.35rem 0.5rem; margin-top:0.25rem; background:${background}; color:${color}; font-size:0.75rem; opacity:${opacity};">
+                                    <span style="font-weight:600;">${label}</span>
+                                    <span>${valueLabel}</span>
+                                </div>`;
+                    }
+
+                    const baseClass = highlight ? 'bg-blue-50 text-blue-800' : 'bg-gray-100 text-gray-700';
+                    const opacityClass = hasDayData ? '' : 'opacity-60';
+                    return `<div class="flex items-center justify-between rounded-lg px-3 py-2 text-xs sm:text-sm ${baseClass} ${opacityClass}">
+                                <span class="font-semibold">${label}</span>
+                                <span>${valueLabel}</span>
+                            </div>`;
+                })
+                .join('');
+
+            if (variant === 'map') {
+                return `<div style="margin-top:0.5rem;">${itemsHtml}</div>`;
+            }
+
+            return `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">${itemsHtml}</div>`;
+        }
+
         // --- 8. Render All Locations Tab ---
         function renderAllLocations() {
             const db = getDb();
@@ -990,31 +1307,65 @@
             
             // Sort by most check-ins
             locations.sort(([, a], [, b]) => b.totalCheckIns - a.totalCheckIns);
-            
+
             for (const [id, data] of locations) {
                 const avgTimeDisplay = data.totalCheckIns > 0
-                    ? `${formatDuration(data.avgWaitSeconds)} דקות`
+                    ? formatDurationWithUnits(data.avgWaitSeconds)
                     : "אין עדיין מידע";
+
+                const stats = computeLocationStats(data.visits);
+                const { dayIndex, hourIndex } = getCurrentTimeContext();
+                const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
+                const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
+                const currentDayLabel = DAY_NAMES_HE[dayIndex];
+
+                const hourlyChartHtml = renderHourlyChart(todaysHourly, hourIndex, {
+                    variant: 'app',
+                    emptyMessage: 'אין עדיין נתונים לשעות היום עבור מיקום זה.'
+                });
+
+                const weeklySummaryHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
+                    variant: 'app',
+                    emptyMessage: 'אין עדיין נתונים שבועיים עבור מיקום זה.'
+                });
 
                 const el = document.createElement('div');
                 el.className = "bg-white p-4 rounded-lg shadow-md border";
                 el.innerHTML = `
-                    <div class="flex justify-between items-start">
-                        <div>
-                            <h3 class="font-semibold text-lg text-gray-800">${data.name}</h3>
-                            <p class="text-sm text-gray-600">זמן המתנה ממוצע: <span class="font-medium text-blue-600">${avgTimeDisplay}</span></p>
-                            <p class="text-sm text-gray-600">סה"כ צ'ק-אינים: <span class="font-medium text-blue-600">${data.totalCheckIns}</span></p>
+                    <div class="flex flex-col gap-4">
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                            <div class="space-y-2">
+                                <h3 class="font-semibold text-lg text-gray-800">${data.name}</h3>
+                                <p class="text-sm text-gray-600">זמן המתנה ממוצע: <span class="font-medium text-blue-600">${avgTimeDisplay}</span></p>
+                                <p class="text-sm text-gray-600">סה"כ צ'ק-אינים: <span class="font-medium text-blue-600">${data.totalCheckIns}</span></p>
+                                <p class="text-xs text-gray-500">שעה נוכחית (${currentDayLabel} · ${formatHourLabel(hourIndex)}): <span class="font-semibold text-blue-600">${currentHourStats.label}</span></p>
+                            </div>
+                            <button class="goto-location-btn self-start text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
+                                עבור למיקום
+                            </button>
                         </div>
-                        <button class="goto-location-btn text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
-                            עבור למיקום
-                        </button>
+                        <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                            <div class="flex items-center justify-between text-xs sm:text-sm text-blue-900 font-semibold">
+                                <span>היום לפי שעות</span>
+                                <span>${currentHourStats.hasData ? currentHourStats.label : 'אין נתונים לשעה זו'}</span>
+                            </div>
+                            ${hourlyChartHtml}
+                        </div>
+                        <div>
+                            <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
+                            ${weeklySummaryHtml}
+                        </div>
                     </div>
                 `;
-                
+
                 el.querySelector('.goto-location-btn').addEventListener('click', () => {
-                    selectLocation(data.coords.lat, data.coords.lon, data.name, id);
+                    const coords = data.coords || {};
+                    const lat = coords.lat ?? coords.latitude;
+                    const lon = coords.lon ?? coords.lng ?? coords.longitude;
+                    if (lat == null || lon == null) return;
+                    selectLocation(lat, lon, data.name, id);
                 });
-                
+
                 allLocationsList.appendChild(el);
             }
         }
@@ -1050,14 +1401,45 @@
                     fillOpacity: 0.2
                 }).addTo(visitedLocationsLayer);
 
+                const averageWaitLabel = data.totalCheckIns > 0
+                    ? formatDurationWithUnits(data.avgWaitSeconds)
+                    : 'אין עדיין מידע';
+
                 const visitList = Array.isArray(data.visits) ? data.visits : [];
                 const recentVisits = visitList.slice(0, 3);
+                const stats = computeLocationStats(visitList);
+                const { dayIndex, hourIndex } = getCurrentTimeContext();
+                const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
+                const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
+                const hourlyChartHtml = renderHourlyChart(todaysHourly, hourIndex, {
+                    variant: 'map',
+                    emptyMessage: 'אין עדיין נתונים לשעות היום במיקום זה.',
+                    hideLabels: true,
+                    height: 56
+                });
+                const weeklySummaryHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
+                    variant: 'map',
+                    compact: true,
+                    emptyMessage: 'אין עדיין נתונים שבועיים במיקום זה.'
+                });
 
                 let popupContent = `
-                    <div dir="rtl" style="text-align: right;">
-                        <div style="font-weight: 600; margin-bottom: 0.25rem;">${data.name}</div>
-                        <div style="font-size: 0.875rem;">צ'ק-אינים: <strong>${data.totalCheckIns}</strong></div>
-                        <div style="font-size: 0.875rem;">זמן המתנה ממוצע: <strong>${formatDuration(data.avgWaitSeconds)} דקות</strong></div>
+                    <div dir="rtl" style="text-align: right; max-width: 260px;">
+                        <div style="font-weight: 600; margin-bottom: 0.25rem; font-size: 0.95rem;">${data.name}</div>
+                        <div style="font-size: 0.82rem;">צ'ק-אינים: <strong>${data.totalCheckIns}</strong></div>
+                        <div style="font-size: 0.82rem;">זמן המתנה ממוצע: <strong>${averageWaitLabel}</strong></div>
+                        <div style="margin-top: 0.5rem; font-size: 0.75rem;">
+                            <div style="font-weight: 600;">שעה נוכחית (${DAY_NAMES_HE[dayIndex]} · ${formatHourLabel(hourIndex)}):</div>
+                            <div style="color: #1d4ed8; font-weight: 600;">${currentHourStats.label}</div>
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                            <div style="font-weight: 600; font-size: 0.75rem; margin-bottom: 0.25rem;">ממוצע לפי שעה (היום)</div>
+                            ${hourlyChartHtml}
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                            <div style="font-weight: 600; font-size: 0.75rem; margin-bottom: 0.25rem;">מבט שבועי</div>
+                            ${weeklySummaryHtml}
+                        </div>
                 `;
 
                 if (recentVisits.length > 0) {
