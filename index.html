@@ -400,6 +400,9 @@
         const waitingScreen = document.getElementById('waiting-screen');
         const onboardingModal = document.getElementById('onboarding-modal');
         const targetDetailsCard = document.getElementById('target-details-card');
+        if (targetDetailsCard) {
+            targetDetailsCard.setAttribute('aria-hidden', 'true');
+        }
         
         // Map Tab
         const searchBtn = document.getElementById('search-btn');
@@ -591,7 +594,16 @@
             }
         }
 
+        function hideLocationCard() {
+            if (!targetDetailsCard) return;
+            targetDetailsCard.classList.add('translate-y-full');
+            targetDetailsCard.classList.remove('float-in');
+            targetDetailsCard.setAttribute('aria-hidden', 'true');
+            targetDetailsCard.innerHTML = '';
+        }
+
         function showLocationCard(name, id) {
+            if (!targetDetailsCard) return;
             const db = getDb();
             const locationData = db[id] || { totalCheckIns: 0, avgWaitSeconds: 0, visits: [] };
 
@@ -613,7 +625,12 @@
             });
 
             targetDetailsCard.innerHTML = `
-                <h3 class="font-bold text-lg mb-2 text-gray-900">${name}</h3>
+                <div class="flex items-start justify-between gap-3 mb-2">
+                    <h3 class="font-bold text-lg text-gray-900">${name}</h3>
+                    <button id="close-location-card-btn" type="button" class="w-8 h-8 flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-lg font-semibold leading-none hover:bg-blue-200 transition" aria-label="סגירת חלון מידע" title="סגירה">
+                        ×
+                    </button>
+                </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
                     <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
                         <div class="font-semibold text-gray-700">זמן המתנה ממוצע</div>
@@ -640,13 +657,20 @@
                     התחל צ'ק-אין למקום
                 </button>
             `;
-            
+
             // Add event listener to the new button
             document.getElementById('start-check-in-btn').onclick = startCheckIn;
-            
+            const closeBtn = document.getElementById('close-location-card-btn');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', hideLocationCard);
+            }
+
             // Animate card in
+            targetDetailsCard.classList.remove('float-in');
+            void targetDetailsCard.offsetWidth;
             targetDetailsCard.classList.remove('translate-y-full');
             targetDetailsCard.classList.add('float-in');
+            targetDetailsCard.setAttribute('aria-hidden', 'false');
         }
 
         // --- 4. Check-In Logic ---
@@ -1330,7 +1354,9 @@
                 });
 
                 const el = document.createElement('div');
-                el.className = "bg-white p-4 rounded-lg shadow-md border";
+                el.className = "bg-white p-4 rounded-lg shadow-md border transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500";
+                el.setAttribute('tabindex', '0');
+                el.setAttribute('role', 'button');
                 el.innerHTML = `
                     <div class="flex flex-col gap-4">
                         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -1358,13 +1384,35 @@
                     </div>
                 `;
 
-                el.querySelector('.goto-location-btn').addEventListener('click', () => {
+                const openLocation = () => {
                     const coords = data.coords || {};
                     const lat = coords.lat ?? coords.latitude;
                     const lon = coords.lon ?? coords.lng ?? coords.longitude;
                     if (lat == null || lon == null) return;
                     selectLocation(lat, lon, data.name, id);
+                };
+
+                el.addEventListener('click', (event) => {
+                    if (event.target.closest('button')) {
+                        return;
+                    }
+                    openLocation();
                 });
+
+                el.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openLocation();
+                    }
+                });
+
+                const gotoBtn = el.querySelector('.goto-location-btn');
+                if (gotoBtn) {
+                    gotoBtn.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        openLocation();
+                    });
+                }
 
                 allLocationsList.appendChild(el);
             }
@@ -1425,7 +1473,12 @@
 
                 let popupContent = `
                     <div dir="rtl" style="text-align: right; max-width: 260px;">
-                        <div style="font-weight: 600; margin-bottom: 0.25rem; font-size: 0.95rem;">${data.name}</div>
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.75rem; margin-bottom:0.35rem;">
+                            <div style="font-weight: 600; font-size: 0.95rem;">${data.name}</div>
+                            <button type="button" class="map-popup-close-btn" aria-label="סגירת חלון מידע" title="סגירה" style="border: none; background: #eff6ff; color: #1d4ed8; border-radius: 999px; width: 1.6rem; height: 1.6rem; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; cursor: pointer;">
+                                ×
+                            </button>
+                        </div>
                         <div style="font-size: 0.82rem;">צ'ק-אינים: <strong>${data.totalCheckIns}</strong></div>
                         <div style="font-size: 0.82rem;">זמן המתנה ממוצע: <strong>${averageWaitLabel}</strong></div>
                         <div style="margin-top: 0.5rem; font-size: 0.75rem;">
@@ -1461,7 +1514,16 @@
 
                 popupContent += '</div>';
 
-                marker.bindPopup(popupContent);
+                marker.bindPopup(popupContent, { closeButton: false });
+                marker.on('popupopen', (event) => {
+                    const popupEl = event.popup.getElement();
+                    if (!popupEl) return;
+                    const closeBtn = popupEl.querySelector('.map-popup-close-btn');
+                    if (!closeBtn) return;
+                    closeBtn.addEventListener('click', () => {
+                        map.closePopup(event.popup);
+                    });
+                });
             }
         }
 
