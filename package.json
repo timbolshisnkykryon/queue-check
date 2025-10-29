@@ -1,0 +1,8 @@
+{
+  "name": "queue-check",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/location-model.test.js"
+  }
+}

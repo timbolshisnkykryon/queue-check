@@ -158,6 +158,214 @@
         .bottom-safe {
             bottom: calc(1rem + var(--safe-area-bottom));
         }
+
+        /* Live Cloud Animations */
+        @keyframes liveDotPulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.55);
+                transform: scale(1);
+            }
+            60% {
+                box-shadow: 0 0 0 8px rgba(249, 115, 22, 0);
+                transform: scale(1.1);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+                transform: scale(1);
+            }
+        }
+
+        @keyframes liveBadgeGlow {
+            0%, 100% {
+                filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.3));
+            }
+            50% {
+                filter: drop-shadow(0 0 18px rgba(45, 212, 191, 0.45));
+            }
+        }
+
+        .live-stream-pill {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.35rem 0.9rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+            opacity: 0;
+            transform: translateY(-10px) scale(0.95);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            pointer-events: none;
+            background: linear-gradient(120deg, #2563eb, #2dd4bf);
+        }
+
+        .live-stream-pill.active {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            animation: liveBadgeGlow 4s ease-in-out infinite;
+        }
+
+        .live-stream-pill.live-mode-receive {
+            background: linear-gradient(120deg, #2563eb, #2dd4bf);
+        }
+
+        .live-stream-pill.live-mode-send {
+            background: linear-gradient(120deg, #f97316, #ef4444);
+        }
+
+        .live-stream-pill .live-dot {
+            width: 0.55rem;
+            height: 0.55rem;
+            border-radius: 9999px;
+            background: #fbbf24;
+            animation: liveDotPulse 1.6s ease-out infinite;
+        }
+
+        .live-stream-pill .live-glimmer {
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: linear-gradient(120deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0));
+            mix-blend-mode: screen;
+            opacity: 0;
+            transform: translateX(-40%);
+            transition: opacity 0.35s ease;
+        }
+
+        .live-stream-pill.active .live-glimmer {
+            opacity: 0.65;
+            animation: shimmerSlide 2.4s ease-in-out infinite;
+        }
+
+        @keyframes shimmerSlide {
+            0% {
+                transform: translateX(-60%);
+            }
+            50% {
+                transform: translateX(60%);
+            }
+            100% {
+                transform: translateX(-60%);
+            }
+        }
+
+        .live-card-animate {
+            animation: liveCardEnter 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        @keyframes liveCardEnter {
+            0% {
+                opacity: 0;
+                transform: translateY(14px) scale(0.96);
+            }
+            60% {
+                opacity: 1;
+                transform: translateY(-3px) scale(1.02);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .waiting-sync-indicator {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+        }
+
+        .waiting-sync-indicator.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .send-beam {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            border: 2px solid rgba(59, 130, 246, 0.18);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at 30% 30%, rgba(125, 211, 252, 0.35), rgba(59, 130, 246, 0.1));
+            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.3);
+            animation: sendPulse 2.4s ease-in-out infinite;
+        }
+
+        .send-beam span {
+            width: 10px;
+            height: 10px;
+            border-radius: 9999px;
+            background: #bae6fd;
+            box-shadow: 0 0 14px rgba(125, 211, 252, 0.9);
+            animation: sendBeamDot 1.4s ease-in-out infinite;
+        }
+
+        @keyframes sendPulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+            }
+            70% {
+                box-shadow: 0 0 0 22px rgba(59, 130, 246, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+            }
+        }
+
+        @keyframes sendBeamDot {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-6px);
+            }
+        }
+
+        .send-trail {
+            display: flex;
+            gap: 0.35rem;
+            justify-content: center;
+            margin-top: 0.75rem;
+        }
+
+        .send-trail span {
+            width: 6px;
+            height: 6px;
+            border-radius: 9999px;
+            background: rgba(191, 219, 254, 0.85);
+            animation: sendTrail 1.2s ease-in-out infinite;
+        }
+
+        .send-trail span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .send-trail span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes sendTrail {
+            0%, 100% {
+                transform: translateY(0);
+                opacity: 0.5;
+            }
+            50% {
+                transform: translateY(-5px);
+                opacity: 1;
+            }
+        }
+
+        .send-spinner {
+            width: 1.1rem;
+            height: 1.1rem;
+            border-radius: 9999px;
+            border: 2px solid rgba(255, 255, 255, 0.45);
+            border-top-color: rgba(255, 255, 255, 0.95);
+            animation: spin 0.8s linear infinite;
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col overflow-x-hidden">
@@ -212,7 +420,14 @@
     <div id="main-screen" class="flex flex-col flex-1 min-h-0">
         <!-- Header -->
         <header class="bg-white shadow-md p-4 z-30">
-            <h1 class="text-2xl font-bold text-center text-blue-600">!תפוס מקום</h1>
+            <div class="flex flex-col items-center gap-2">
+                <h1 class="text-2xl font-bold text-center text-blue-600">!תפוס מקום</h1>
+                <div id="live-status-pill" class="live-stream-pill live-mode-receive" role="status" aria-live="polite">
+                    <span class="live-glimmer" aria-hidden="true"></span>
+                    <span class="live-dot" aria-hidden="true"></span>
+                    <span id="live-status-text">מתחבר לנתונים חיים...</span>
+                </div>
+            </div>
         </header>
         
         <!-- Tab Navigation -->
@@ -316,6 +531,15 @@
                     <p id="info-result" class="text-gray-200 whitespace-pre-wrap text-sm leading-relaxed"></p>
                     <div id="info-sources" class="mt-3 text-sm text-gray-400"></div>
                 </div>
+                <div id="waiting-sync-indicator" class="waiting-sync-indicator hidden flex flex-col items-center text-center pt-4">
+                    <div class="send-beam"><span></span></div>
+                    <p class="mt-3 text-sm text-blue-100 font-semibold">שומר נתונים לענן...</p>
+                    <div class="send-trail">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -364,6 +588,32 @@
 
 
     <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+    import {
+        collection,
+        doc,
+        getFirestore,
+        onSnapshot,
+        orderBy,
+        query,
+        runTransaction,
+        serverTimestamp
+    } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+    import {
+        MAX_VISIT_HISTORY,
+        normalizeLocationRecord,
+        prepareCheckInUpdate,
+        sanitizeCoords
+    } from './app/location-model.js';
+
+    let firebaseConfig;
+    try {
+        const configModule = await import('./firebase-config.js');
+        firebaseConfig = configModule.firebaseConfig;
+    } catch (error) {
+        console.error('Firebase configuration not found. Copy firebase-config.js.example to firebase-config.js and provide your project credentials.', error);
+    }
+
     // Immediately Invoked Function Expression (IIFE) to encapsulate the app
     (function () {
         // --- App State ---
@@ -382,14 +632,24 @@
         let lastKnownPosition = null;
         let confirmationCooldownUntil = null; // Cooldown for arrival confirmation
         let visitedLocationsLayer;
+        let isSavingCheckIn = false;
+        let liveStatusTimeoutId = null;
+        let waitingSyncHideTimeoutId = null;
+
+        // --- Firebase State ---
+        let firebaseAppInstance = null;
+        let firestoreDb = null;
+        let unsubscribeLocations = null;
+        let locationsLoaded = false;
+        let firebaseInitializationError = null;
+        const locationCache = new Map();
 
         // --- IMPORTANT API KEY ---
         // The Gemini API features will not work without a valid API key.
         // Get one from Google AI Studio and paste it here.
         const GEMINI_API_KEY = "AIzaSyC_DLS4a-6tU26oME_NqYQfIFfSg8rg1fo"; // <--- PASTE YOUR API KEY HERE
 
-        // --- Local Storage DB Key ---
-        const LOCAL_DB_KEY = 'tfosMakomDB';
+        const FIRESTORE_LOCATIONS_COLLECTION = 'locations';
 
         const HOURS_PER_DAY = 24;
         const DAY_NAMES_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -400,6 +660,8 @@
         const waitingScreen = document.getElementById('waiting-screen');
         const onboardingModal = document.getElementById('onboarding-modal');
         const targetDetailsCard = document.getElementById('target-details-card');
+        const liveStatusPill = document.getElementById('live-status-pill');
+        const liveStatusText = document.getElementById('live-status-text');
         if (targetDetailsCard) {
             targetDetailsCard.setAttribute('aria-hidden', 'true');
         }
@@ -425,7 +687,8 @@
         const infoErrorEl = document.getElementById('info-error');
         const cancelCheckInBtn = document.getElementById('cancel-check-in-btn');
         const manualFinishBtn = document.getElementById('manual-finish-btn');
-        
+        const waitingSyncIndicator = document.getElementById('waiting-sync-indicator');
+
         // Success Modal
         const successMessage = document.getElementById('success-message');
         const successTime = document.getElementById('success-time');
@@ -437,9 +700,9 @@
         const denyArrivalBtn = document.getElementById('deny-arrival-btn');
 
         // --- 0. Initialize App ---
-        function initApp() {
+        async function initApp() {
             initMap();
-            
+
             // Define user icon
             userIcon = L.divIcon({
                 className: 'user-location-icon',
@@ -452,8 +715,8 @@
                 if (e.key === 'Enter') handleSearchLocation();
             });
             
-            cancelCheckInBtn.addEventListener('click', () => finishCheckIn(false)); // Don't save
-            manualFinishBtn.addEventListener('click', () => finishCheckIn(true)); // Save
+            cancelCheckInBtn.addEventListener('click', () => { void finishCheckIn(false); }); // Don't save
+            manualFinishBtn.addEventListener('click', () => { void finishCheckIn(true); }); // Save
             closeSuccessBtn.addEventListener('click', () => successMessage.classList.add('hidden'));
 
             // Arrival Confirmation Listeners
@@ -470,9 +733,11 @@
                 onboardingModal.classList.remove('hidden');
             }
             
+            await initializeFirebase();
+
             // Load saved locations into tab
             renderAllLocations();
-            
+
             // Start GPS Watcher on load
             startGpsWatcher();
         }
@@ -495,7 +760,7 @@
         window.switchTab = function(tabName) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-            
+
             document.getElementById(`tab-content-${tabName}`).classList.add('active');
             document.getElementById(`tab-btn-${tabName}`).classList.add('active');
 
@@ -507,7 +772,84 @@
                 setTimeout(() => map.invalidateSize(), 0);
             }
         }
-        
+
+        // --- Firebase Integration ---
+        async function initializeFirebase() {
+            if (!firebaseConfig) {
+                firebaseInitializationError = new Error('חסרה תצורת Firebase.');
+                locationsLoaded = true;
+                renderAllLocations();
+                return;
+            }
+
+            if (firebaseAppInstance) {
+                return;
+            }
+
+            try {
+                firebaseAppInstance = initializeApp(firebaseConfig);
+                firestoreDb = getFirestore(firebaseAppInstance);
+                subscribeToLocations();
+            } catch (error) {
+                firebaseInitializationError = error;
+                console.error('Failed to initialize Firebase', error);
+                renderAllLocations();
+            }
+        }
+
+        function subscribeToLocations() {
+            if (!firestoreDb) return;
+
+            if (unsubscribeLocations) {
+                unsubscribeLocations();
+            }
+
+            const locationsRef = collection(firestoreDb, FIRESTORE_LOCATIONS_COLLECTION);
+            const q = query(locationsRef, orderBy('name', 'asc'));
+
+            unsubscribeLocations = onSnapshot(q, (snapshot) => {
+                locationCache.clear();
+
+                snapshot.forEach((docSnap) => {
+                    const normalized = normalizeLocationRecord(docSnap.id, docSnap.data(), { maxVisitHistory: MAX_VISIT_HISTORY });
+                    locationCache.set(docSnap.id, normalized);
+                });
+
+                locationsLoaded = true;
+                firebaseInitializationError = null;
+                onLocationDataUpdated();
+                pulseLiveStatus('receive', 'נתונים חיים עודכנו');
+            }, (error) => {
+                console.error('Firestore listener error', error);
+                firebaseInitializationError = error;
+                locationsLoaded = true;
+                renderAllLocations();
+            });
+        }
+
+        function onLocationDataUpdated() {
+            renderAllLocations();
+            renderVisitedLocationsOnMap();
+
+            if (currentLocationId && targetDetailsCard && targetDetailsCard.getAttribute('aria-hidden') === 'false') {
+                showLocationCard(targetName, currentLocationId);
+            }
+        }
+
+        function getLocationFromCache(id) {
+            if (!id) return null;
+            return locationCache.get(id) || null;
+        }
+
+        function upsertLocationInCache(id, data) {
+            if (!id) return;
+
+            const normalized = normalizeLocationRecord(id, data, { maxVisitHistory: MAX_VISIT_HISTORY });
+            locationCache.set(id, normalized);
+            locationsLoaded = true;
+            onLocationDataUpdated();
+        }
+
         // --- 3. Map & Search ---
         function initMap() {
             map = L.map('map', {
@@ -607,8 +949,7 @@
 
         function showLocationCard(name, id) {
             if (!targetDetailsCard) return;
-            const db = getDb();
-            const locationData = db[id] || { totalCheckIns: 0, avgWaitSeconds: 0, visits: [] };
+            const locationData = getLocationFromCache(id) || { name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords) };
 
             const avgTimeDisplay = locationData.totalCheckIns > 0
                 ? formatDurationWithUnits(locationData.avgWaitSeconds)
@@ -785,7 +1126,7 @@
        
         function handleConfirmArrival() {
             arrivalConfirmationModal.classList.add('hidden');
-            finishCheckIn(true); // Save data and finish
+            void finishCheckIn(true); // Save data and finish
         }
 
         function handleDenyArrival() {
@@ -800,7 +1141,11 @@
             }
         }
 
-        function finishCheckIn(saveData) {
+        async function finishCheckIn(saveData) {
+            if (isSavingCheckIn) {
+                return;
+            }
+
             // Ensure confirmation modal is hidden and cooldown is reset
             arrivalConfirmationModal.classList.add('hidden');
             confirmationCooldownUntil = null;
@@ -817,13 +1162,22 @@
             
             if (saveData && checkInStartTime) {
                 const elapsedSeconds = (Date.now() - checkInStartTime) / 1000;
-                saveWaitTime(currentLocationId, targetName, targetCoords, elapsedSeconds);
-                
-                // Show success message
-                successTime.textContent = `זמן ההמתנה שלך (${finalTimeDisplay}) נשמר!`;
-                successMessage.classList.remove('hidden');
+
+                try {
+                    setWaitingScreenSavingState(true);
+                    await saveWaitTime(currentLocationId, targetName, targetCoords, elapsedSeconds);
+
+                    // Show success message
+                    successTime.textContent = `זמן ההמתנה שלך (${finalTimeDisplay}) נשמר!`;
+                    successMessage.classList.remove('hidden');
+                } catch (error) {
+                    console.error('Failed to save wait time', error);
+                    alert('אירעה שגיאה בשמירת הנתונים לענן. אנא נסה שוב.');
+                } finally {
+                    setWaitingScreenSavingState(false);
+                }
             }
-            
+
             // Reset state
             checkInStartTime = null;
             // currentLocationId and targetName are kept for the card
@@ -979,92 +1333,6 @@
             return directions[index];
         }
 
-        // --- 7. Local Storage DB ---
-        function normalizeDatabaseSchema(db) {
-            if (!db || typeof db !== 'object') return { db, mutated: false };
-
-            let mutated = false;
-
-            for (const location of Object.values(db)) {
-                if (!location || typeof location !== 'object') continue;
-
-                if (!Array.isArray(location.visits)) {
-                    location.visits = [];
-                    mutated = true;
-                    continue;
-                }
-
-                location.visits = location.visits
-                    .map((visit) => {
-                        if (!visit || typeof visit !== 'object') {
-                            mutated = true;
-                            return null;
-                        }
-
-                        const normalized = { ...visit };
-
-                        const numericWait = Number(normalized.waitSeconds);
-                        if (!Number.isFinite(numericWait) || numericWait < 0) {
-                            normalized.waitSeconds = 0;
-                            mutated = true;
-                        } else {
-                            normalized.waitSeconds = numericWait;
-                        }
-
-                        let parsedDate = null;
-                        if (normalized.timestamp) {
-                            const maybeDate = new Date(normalized.timestamp);
-                            if (!Number.isNaN(maybeDate.getTime())) {
-                                parsedDate = maybeDate;
-                                normalized.timestamp = maybeDate.toISOString();
-                            }
-                        }
-
-                        if (!parsedDate) {
-                            parsedDate = new Date();
-                            normalized.timestamp = parsedDate.toISOString();
-                            mutated = true;
-                        }
-
-                        if (!Number.isInteger(normalized.dayOfWeek) || normalized.dayOfWeek < 0 || normalized.dayOfWeek > 6) {
-                            normalized.dayOfWeek = parsedDate ? parsedDate.getDay() : Math.floor(Math.random() * 7);
-                            mutated = true;
-                        }
-
-                        if (!Number.isInteger(normalized.hourOfDay) || normalized.hourOfDay < 0 || normalized.hourOfDay > 23) {
-                            normalized.hourOfDay = parsedDate ? parsedDate.getHours() : Math.floor(Math.random() * HOURS_PER_DAY);
-                            mutated = true;
-                        }
-
-                        return normalized;
-                    })
-                    .filter(Boolean);
-            }
-
-            return { db, mutated };
-        }
-
-        function getDb() {
-            try {
-                const db = localStorage.getItem(LOCAL_DB_KEY);
-                const parsed = db ? JSON.parse(db) : {};
-                const { mutated } = normalizeDatabaseSchema(parsed);
-
-                if (mutated) {
-                    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(parsed));
-                }
-
-                return parsed;
-            } catch (e) {
-                console.error("Failed to parse local DB", e);
-                return {};
-            }
-        }
-
-        function saveDb(db) {
-            localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db));
-        }
-
         function getCurrentTimeContext(referenceDate = new Date()) {
             return {
                 now: referenceDate,
@@ -1099,45 +1367,37 @@
             return { hasData: false, seconds: null, label: 'אין נתונים לשעה זו עדיין' };
         }
 
-        function saveWaitTime(id, name, coords, waitSeconds) {
-            const db = getDb();
-            const locationData = db[id] || {
-                name: name,
-                coords: coords,
-                totalCheckIns: 0,
-                totalWaitSeconds: 0,
-                avgWaitSeconds: 0,
-                visits: []
-            };
-
-            locationData.totalCheckIns += 1;
-            locationData.totalWaitSeconds += waitSeconds;
-            locationData.avgWaitSeconds = locationData.totalWaitSeconds / locationData.totalCheckIns;
-
-            if (!Array.isArray(locationData.visits)) {
-                locationData.visits = [];
+        async function saveWaitTime(id, name, coords, waitSeconds) {
+            if (!firestoreDb) {
+                throw new Error('Firebase אינו מוכן.');
             }
 
-            const { now, dayIndex, hourIndex } = getCurrentTimeContext();
+            const normalizedCoords = sanitizeCoords(coords) || sanitizeCoords(targetCoords);
+            const now = new Date();
+            let updatedDataForCache = null;
 
-            locationData.visits.unshift({
-                timestamp: now.toISOString(),
-                waitSeconds: waitSeconds,
-                dayOfWeek: dayIndex,
-                hourOfDay: hourIndex
+            pulseLiveStatus('send', 'שומר נתונים לענן...');
+            await runTransaction(firestoreDb, async (transaction) => {
+                const locationRef = doc(firestoreDb, FIRESTORE_LOCATIONS_COLLECTION, id);
+                const snapshot = await transaction.get(locationRef);
+
+                const existingData = snapshot.exists()
+                    ? normalizeLocationRecord(id, snapshot.data(), { maxVisitHistory: MAX_VISIT_HISTORY })
+                    : { id, name, coords: normalizedCoords, totalCheckIns: 0, totalWaitSeconds: 0, avgWaitSeconds: 0, visits: [] };
+
+                const { data } = prepareCheckInUpdate(existingData, { waitSeconds, now, name, coords: normalizedCoords });
+
+                updatedDataForCache = { ...existingData, ...data };
+
+                transaction.set(locationRef, {
+                    ...data,
+                    lastUpdatedAt: serverTimestamp()
+                }, { merge: true });
             });
+            pulseLiveStatus('receive', 'הסנכרון הושלם!');
 
-            // Keep only the most recent 20 visits to avoid unlimited growth
-            locationData.visits = locationData.visits.slice(0, 20);
-
-            db[id] = locationData;
-            saveDb(db);
-
-            renderVisitedLocationsOnMap();
-
-            // Re-render location list if tab is open
-            if (document.getElementById('tab-content-locations').classList.contains('active')) {
-                renderAllLocations();
+            if (updatedDataForCache) {
+                upsertLocationInCache(id, updatedDataForCache);
             }
         }
 
@@ -1320,20 +1580,93 @@
             return `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">${itemsHtml}</div>`;
         }
 
+        function animateLiveCard(element) {
+            if (!element) return;
+
+            element.classList.remove('live-card-animate');
+            void element.offsetWidth;
+            element.classList.add('live-card-animate');
+            element.addEventListener('animationend', () => {
+                element.classList.remove('live-card-animate');
+            }, { once: true });
+        }
+
+        function pulseLiveStatus(mode, message, options = {}) {
+            if (!liveStatusPill || !liveStatusText) return;
+
+            const { duration = 2200 } = options;
+            liveStatusPill.classList.remove('live-mode-send', 'live-mode-receive');
+            if (mode === 'send') {
+                liveStatusPill.classList.add('live-mode-send');
+            } else {
+                liveStatusPill.classList.add('live-mode-receive');
+            }
+
+            liveStatusText.textContent = message;
+
+            liveStatusPill.classList.remove('active');
+            void liveStatusPill.offsetWidth;
+            liveStatusPill.classList.add('active');
+
+            if (liveStatusTimeoutId) {
+                clearTimeout(liveStatusTimeoutId);
+            }
+
+            liveStatusTimeoutId = window.setTimeout(() => {
+                if (liveStatusPill) {
+                    liveStatusPill.classList.remove('active');
+                }
+                liveStatusTimeoutId = null;
+            }, duration);
+        }
+
+        function setWaitingSyncIndicatorActive(isActive) {
+            if (!waitingSyncIndicator) return;
+
+            if (waitingSyncHideTimeoutId) {
+                clearTimeout(waitingSyncHideTimeoutId);
+                waitingSyncHideTimeoutId = null;
+            }
+
+            if (isActive) {
+                waitingSyncIndicator.classList.remove('hidden');
+                waitingSyncIndicator.classList.add('active');
+            } else {
+                waitingSyncIndicator.classList.remove('active');
+                waitingSyncHideTimeoutId = window.setTimeout(() => {
+                    if (waitingSyncIndicator) {
+                        waitingSyncIndicator.classList.add('hidden');
+                    }
+                    waitingSyncHideTimeoutId = null;
+                }, 300);
+            }
+        }
+
         // --- 8. Render All Locations Tab ---
         function renderAllLocations() {
-            const db = getDb();
-            const locations = Object.entries(db);
+            if (!allLocationsList) return;
+
+            if (!locationsLoaded) {
+                allLocationsList.innerHTML = `<p class="text-gray-500 text-center">טוען נתונים מהענן...</p>`;
+                return;
+            }
+
+            if (firebaseInitializationError) {
+                const errorText = firebaseInitializationError?.message || 'אנא בדוק את החיבור והגדרות Firebase.';
+                allLocationsList.innerHTML = `<p class="text-red-500 text-center">שגיאה בטעינת נתוני Firebase: ${errorText}</p>`;
+                return;
+            }
+
+            const locations = Array.from(locationCache.entries());
 
             if (locations.length === 0) {
                 allLocationsList.innerHTML = `<p class="text-gray-500 text-center">עדיין לא שמרתם מקומות...</p>`;
                 return;
             }
-            
-            allLocationsList.innerHTML = ''; // Clear list
-            
-            // Sort by most check-ins
-            locations.sort(([, a], [, b]) => b.totalCheckIns - a.totalCheckIns);
+
+            allLocationsList.innerHTML = '';
+
+            locations.sort(([, a], [, b]) => (b.totalCheckIns || 0) - (a.totalCheckIns || 0));
 
             for (const [id, data] of locations) {
                 const avgTimeDisplay = data.totalCheckIns > 0
@@ -1452,7 +1785,35 @@
                 }
 
                 allLocationsList.appendChild(el);
+                animateLiveCard(el);
             }
+        }
+
+        function setWaitingScreenSavingState(isSaving) {
+            isSavingCheckIn = isSaving;
+
+            if (manualFinishBtn) {
+                manualFinishBtn.disabled = isSaving;
+                if (isSaving) {
+                    manualFinishBtn.innerHTML = '<span class="inline-flex items-center justify-center gap-2 w-full"><span class="send-spinner"></span><span>שומר נתונים...</span></span>';
+                } else {
+                    manualFinishBtn.textContent = 'סיום ידני ושמירה';
+                }
+            }
+
+            if (cancelCheckInBtn) {
+                cancelCheckInBtn.disabled = isSaving;
+            }
+
+            if (confirmArrivalBtn) {
+                confirmArrivalBtn.disabled = isSaving;
+            }
+
+            if (denyArrivalBtn) {
+                denyArrivalBtn.disabled = isSaving;
+            }
+
+            setWaitingSyncIndicatorActive(isSaving);
         }
 
         function renderVisitedLocationsOnMap() {
@@ -1464,9 +1825,11 @@
 
             visitedLocationsLayer.clearLayers();
 
-            const db = getDb();
+            if (!locationsLoaded) {
+                return;
+            }
 
-            for (const [id, data] of Object.entries(db)) {
+            for (const [id, data] of locationCache.entries()) {
                 if (!data || !data.coords || !data.totalCheckIns) continue;
 
                 const rawLat = data.coords.lat ?? data.coords.latitude;
