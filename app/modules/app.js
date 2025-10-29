@@ -68,6 +68,10 @@ export function initializeApplication(context) {
         targetDetailsCard,
         liveStatusPill,
         liveStatusText,
+        mainHeader,
+        tabNavigation,
+        mapSearchBar,
+        mapContainer,
         searchBtn,
         locationNameInput,
         gpsStatusBtn,
@@ -105,6 +109,14 @@ export function initializeApplication(context) {
         tabContainers,
         tabButtons
     } = elements;
+
+    const POPUP_VISIBILITY_ATTEMPT_KEY = '__queueCheckPopupEnsureAttempts';
+    const DEFAULT_VISIBILITY_PADDING = Object.freeze({
+        top: 32,
+        bottom: 40,
+        left: 16,
+        right: 16
+    });
 
     function updateState() {
         Object.assign(state, {
@@ -1560,6 +1572,155 @@ function setWaitingScreenSavingState(isSaving) {
     updateState();
 }
 
+function createLeafletPoint(x, y) {
+    if (typeof L !== 'undefined' && L?.point) {
+        return L.point(x, y);
+    }
+    return [x, y];
+}
+
+function getSafeAreaInset(side) {
+    if (typeof window === 'undefined' || !document?.documentElement) {
+        return 0;
+    }
+
+    try {
+        const computed = window.getComputedStyle(document.documentElement);
+        const variableName = side === 'top' ? '--safe-area-top' : '--safe-area-bottom';
+        const value = computed.getPropertyValue(variableName);
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    } catch (error) {
+        return 0;
+    }
+}
+
+function getElementHeightIfVisible(element) {
+    if (!element || typeof element.getBoundingClientRect !== 'function') {
+        return 0;
+    }
+
+    if (element.getAttribute && element.getAttribute('aria-hidden') === 'true') {
+        return 0;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (!rect || rect.height <= 0 || rect.width <= 0) {
+        return 0;
+    }
+
+    return rect.height;
+}
+
+function applyVisitedLocationPopupOptions(popup, popupOptions = {}) {
+    if (!popup || !popupOptions) {
+        return;
+    }
+
+    if (Number.isFinite(popupOptions.maxWidth)) {
+        popup.options.maxWidth = popupOptions.maxWidth;
+    }
+
+    if (Number.isFinite(popupOptions.minWidth)) {
+        popup.options.minWidth = popupOptions.minWidth;
+    }
+
+    if (popupOptions.autoPanPadding) {
+        popup.options.autoPanPadding = popupOptions.autoPanPadding;
+    }
+
+    if (popupOptions.autoPanPaddingTopLeft) {
+        popup.options.autoPanPaddingTopLeft = popupOptions.autoPanPaddingTopLeft;
+    }
+
+    if (popupOptions.autoPanPaddingBottomRight) {
+        popup.options.autoPanPaddingBottomRight = popupOptions.autoPanPaddingBottomRight;
+    }
+
+    popup.__queueCheckVisibilityPadding = popupOptions.visibilityPadding || DEFAULT_VISIBILITY_PADDING;
+}
+
+function resetPopupVisibilityAttempts(popup) {
+    if (!popup) {
+        return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(popup, POPUP_VISIBILITY_ATTEMPT_KEY)) {
+        delete popup[POPUP_VISIBILITY_ATTEMPT_KEY];
+    }
+}
+
+function ensurePopupVisible(popup, popupOptions = null) {
+    if (!popup || !map) {
+        return;
+    }
+
+    const attempts = popup[POPUP_VISIBILITY_ATTEMPT_KEY] ?? 0;
+    if (attempts > 3) {
+        resetPopupVisibilityAttempts(popup);
+        return;
+    }
+
+    const schedule = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+        ? window.requestAnimationFrame.bind(window)
+        : (fn) => setTimeout(fn, 16);
+
+    schedule(() => {
+        const popupElement = typeof popup.getElement === 'function' ? popup.getElement() : popup._container;
+        const container = mapContainer && typeof mapContainer.getBoundingClientRect === 'function'
+            ? mapContainer
+            : (typeof map.getContainer === 'function' ? map.getContainer() : null);
+
+        if (!popupElement || !container) {
+            return;
+        }
+
+        const mapRect = container.getBoundingClientRect();
+        const popupRect = popupElement.getBoundingClientRect();
+
+        if (!mapRect || !popupRect) {
+            return;
+        }
+
+        const padding = (popupOptions && popupOptions.visibilityPadding)
+            || popup.__queueCheckVisibilityPadding
+            || DEFAULT_VISIBILITY_PADDING;
+
+        const leftBound = mapRect.left + (padding.left ?? DEFAULT_VISIBILITY_PADDING.left);
+        const rightBound = mapRect.right - (padding.right ?? DEFAULT_VISIBILITY_PADDING.right);
+        const topBound = mapRect.top + (padding.top ?? DEFAULT_VISIBILITY_PADDING.top);
+        const bottomBound = mapRect.bottom - (padding.bottom ?? DEFAULT_VISIBILITY_PADDING.bottom);
+
+        let offsetX = 0;
+        if (popupRect.left < leftBound) {
+            offsetX = leftBound - popupRect.left;
+        } else if (popupRect.right > rightBound) {
+            offsetX = -(popupRect.right - rightBound);
+        }
+
+        let offsetY = 0;
+        if (popupRect.top < topBound) {
+            offsetY = topBound - popupRect.top;
+        } else if (popupRect.bottom > bottomBound) {
+            offsetY = -(popupRect.bottom - bottomBound);
+        }
+
+        if (offsetX !== 0 || offsetY !== 0) {
+            popup[POPUP_VISIBILITY_ATTEMPT_KEY] = attempts + 1;
+            map.panBy([offsetX, offsetY], {
+                animate: true,
+                duration: 0.35,
+                easeLinearity: 0.25,
+                noMoveStart: true
+            });
+
+            map.once('moveend', () => ensurePopupVisible(popup, popupOptions));
+        } else if (attempts > 0) {
+            resetPopupVisibilityAttempts(popup);
+        }
+    });
+}
+
 function renderVisitedLocationsOnMap() {
     if (!map) return;
 
@@ -1589,6 +1750,18 @@ function renderVisitedLocationsOnMap() {
 
         const locationName = data.name || `מיקום (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
 
+        const locationDetails = {
+            id,
+            name: locationName,
+            totalCheckIns: data.totalCheckIns,
+            avgWaitSeconds: data.avgWaitSeconds,
+            lastVisitAt: data?.visits?.[0]?.timestamp ?? data?.lastUpdatedAt ?? null
+        };
+
+        let popupOptions = getVisitedLocationPopupOptions();
+        let lastPopupOptions = popupOptions;
+        const popupContent = buildVisitedLocationPopupContent(locationDetails, popupOptions);
+
         marker.bindTooltip(locationName, {
             permanent: true,
             direction: 'top',
@@ -1597,15 +1770,216 @@ function renderVisitedLocationsOnMap() {
             className: 'map-location-label'
         });
 
+        const popupConfig = {
+            maxWidth: popupOptions.maxWidth,
+            minWidth: popupOptions.minWidth,
+            autoPan: true,
+            closeButton: true,
+            className: 'visited-location-popup'
+        };
+
+        if (popupOptions.autoPanPadding) {
+            popupConfig.autoPanPadding = popupOptions.autoPanPadding;
+        }
+
+        if (popupOptions.autoPanPaddingTopLeft) {
+            popupConfig.autoPanPaddingTopLeft = popupOptions.autoPanPaddingTopLeft;
+        }
+
+        if (popupOptions.autoPanPaddingBottomRight) {
+            popupConfig.autoPanPaddingBottomRight = popupOptions.autoPanPaddingBottomRight;
+        }
+
+        marker.bindPopup(popupContent, popupConfig);
+
+        const initialPopup = marker.getPopup();
+        if (initialPopup) {
+            applyVisitedLocationPopupOptions(initialPopup, popupOptions);
+        }
+
         marker.on('click', () => {
             if (locationNameInput) {
                 locationNameInput.value = locationName;
             }
             selectLocation(lat, lon, locationName, id);
+
+            const popup = marker.getPopup();
+            if (popup) {
+                popupOptions = getVisitedLocationPopupOptions();
+                lastPopupOptions = popupOptions;
+                applyVisitedLocationPopupOptions(popup, popupOptions);
+                popup.setContent(buildVisitedLocationPopupContent(locationDetails, popupOptions));
+                popup.update();
+                resetPopupVisibilityAttempts(popup);
+            }
+
+            marker.openPopup();
+        });
+
+        marker.on('popupopen', (event) => {
+            const popup = event?.popup || marker.getPopup();
+            if (!popup) {
+                return;
+            }
+
+            const optionsForVisibility = lastPopupOptions || popupOptions || getVisitedLocationPopupOptions();
+            ensurePopupVisible(popup, optionsForVisibility);
+        });
+
+        marker.on('popupclose', (event) => {
+            const popup = event?.popup || marker.getPopup();
+            resetPopupVisibilityAttempts(popup);
         });
     }
 
     updateState();
+}
+
+function getVisitedLocationPopupOptions() {
+    const fallbackOptions = {
+        maxWidth: 240,
+        minWidth: 180,
+        maxHeight: 280,
+        autoPanPadding: createLeafletPoint(24, 36),
+        autoPanPaddingTopLeft: createLeafletPoint(24, 36),
+        autoPanPaddingBottomRight: createLeafletPoint(24, 36),
+        visibilityPadding: DEFAULT_VISIBILITY_PADDING
+    };
+
+    if (!map || typeof map.getSize !== 'function') {
+        return fallbackOptions;
+    }
+
+    const mapSize = map.getSize();
+    const mapWidth = Number.isFinite(mapSize?.x) && mapSize.x > 0 ? mapSize.x : 0;
+    const mapHeight = Number.isFinite(mapSize?.y) && mapSize.y > 0 ? mapSize.y : 0;
+
+    if (mapWidth <= 0 || mapHeight <= 0) {
+        return fallbackOptions;
+    }
+
+    const safeAreaTop = getSafeAreaInset('top');
+    const safeAreaBottom = getSafeAreaInset('bottom');
+    const headerHeight = getElementHeightIfVisible(mainHeader);
+    const navHeight = getElementHeightIfVisible(tabNavigation);
+    const searchHeight = getElementHeightIfVisible(mapSearchBar);
+    const gpsButtonHeight = getElementHeightIfVisible(gpsStatusBtn);
+    const targetCardVisible = targetDetailsCard && targetDetailsCard.getAttribute('aria-hidden') === 'false';
+    const targetCardHeight = targetCardVisible ? getElementHeightIfVisible(targetDetailsCard) : 0;
+
+    const topOverlayHeight = safeAreaTop + headerHeight + navHeight + searchHeight;
+    const bottomOverlayHeight = safeAreaBottom + gpsButtonHeight + targetCardHeight;
+
+    const horizontalPadding = Math.max(18, Math.floor(mapWidth * 0.08));
+    const visibilityTop = Math.max(28, Math.round(topOverlayHeight + 16));
+    const visibilityBottom = Math.max(32, Math.round(bottomOverlayHeight + 20));
+
+    const baselineMaxHeight = Math.max(160, Math.floor(mapHeight * 0.55));
+    let availableHeight = mapHeight - (visibilityTop + visibilityBottom) - 32;
+    if (!Number.isFinite(availableHeight)) {
+        availableHeight = baselineMaxHeight;
+    }
+
+    const minReasonableHeight = Math.max(160, Math.floor(mapHeight * 0.35));
+    if (Number.isFinite(availableHeight) && availableHeight > 0) {
+        availableHeight = Math.max(minReasonableHeight, Math.floor(availableHeight));
+    } else {
+        availableHeight = minReasonableHeight;
+    }
+
+    const maxHeight = Math.min(Math.max(minReasonableHeight, availableHeight), Math.min(baselineMaxHeight, 420));
+
+    const maxWidth = Math.max(200, Math.min(Math.floor(mapWidth * 0.5), 360));
+    const minWidth = Math.min(Math.max(180, Math.floor(mapWidth * 0.36)), maxWidth);
+
+    const maxPanPadding = Math.max(56, Math.floor(mapHeight * 0.8));
+    const topPanPadding = Math.min(
+        maxPanPadding,
+        Math.max(Math.floor(mapHeight * 0.24), visibilityTop + Math.ceil(maxHeight * 0.6))
+    );
+    const bottomPanPadding = Math.min(
+        maxPanPadding,
+        Math.max(Math.floor(mapHeight * 0.2), visibilityBottom + Math.ceil(maxHeight * 0.4))
+    );
+
+    const autoPanPaddingTopLeft = createLeafletPoint(horizontalPadding, topPanPadding);
+    const autoPanPaddingBottomRight = createLeafletPoint(horizontalPadding, bottomPanPadding);
+    const autoPanPadding = createLeafletPoint(horizontalPadding, Math.max(topPanPadding, bottomPanPadding));
+
+    return {
+        maxWidth,
+        minWidth,
+        maxHeight,
+        autoPanPadding,
+        autoPanPaddingTopLeft,
+        autoPanPaddingBottomRight,
+        visibilityPadding: {
+            top: visibilityTop,
+            bottom: visibilityBottom,
+            left: horizontalPadding,
+            right: horizontalPadding
+        }
+    };
+}
+
+function buildVisitedLocationPopupContent(locationData, popupOptions = {}) {
+    const totalCheckIns = Number.isFinite(Number(locationData.totalCheckIns))
+        ? Number(locationData.totalCheckIns)
+        : 0;
+
+    const avgWaitSeconds = Number.isFinite(Number(locationData.avgWaitSeconds)) && Number(locationData.avgWaitSeconds) > 0
+        ? Number(locationData.avgWaitSeconds)
+        : null;
+
+    const lastVisitAt = locationData.lastVisitAt || null;
+
+    const totalCheckInsText = totalCheckIns > 0
+        ? totalCheckIns.toLocaleString('he-IL')
+        : '—';
+
+    const avgWaitText = avgWaitSeconds
+        ? formatDuration(avgWaitSeconds)
+        : 'לא זמין';
+
+    const lastVisitText = lastVisitAt
+        ? formatTimestamp(lastVisitAt)
+        : 'לא נרשם';
+
+    const styleAttributes = [];
+    if (popupOptions.minWidth) {
+        styleAttributes.push(`min-width:${popupOptions.minWidth}px`);
+    }
+    if (popupOptions.maxWidth) {
+        styleAttributes.push(`max-width:${popupOptions.maxWidth}px`);
+    }
+    if (popupOptions.maxHeight) {
+        styleAttributes.push(`max-height:${popupOptions.maxHeight}px`);
+        styleAttributes.push('overflow-y:auto');
+    }
+
+    const styleAttribute = styleAttributes.length > 0
+        ? ` style="${styleAttributes.join(';')}"`
+        : '';
+
+    return `
+        <div class="visited-location-popup__content"${styleAttribute}>
+            <h3 class="visited-location-popup__title">${escapeHtml(locationData.name || 'מיקום ללא שם')}</h3>
+            <dl class="visited-location-popup__stats">
+                <div>
+                    <dt>סה"כ ביקורים</dt>
+                    <dd>${escapeHtml(totalCheckInsText)}</dd>
+                </div>
+                <div>
+                    <dt>המתנה ממוצעת</dt>
+                    <dd>${escapeHtml(avgWaitText)}</dd>
+                </div>
+                <div>
+                    <dt>ביקור אחרון</dt>
+                    <dd>${escapeHtml(lastVisitText)}</dd>
+                </div>
+            </dl>
+        </div>
+    `;
 }
 
 function formatDuration(seconds) {

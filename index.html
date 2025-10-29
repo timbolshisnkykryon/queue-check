@@ -90,6 +90,67 @@
             line-height: 1.4;
         }
 
+        .visited-location-popup .leaflet-popup-content-wrapper {
+            border-radius: 0.75rem;
+            padding: 0;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
+        }
+
+        .visited-location-popup .leaflet-popup-tip {
+            background: #ffffff;
+        }
+
+        .visited-location-popup .leaflet-popup-content {
+            margin: 0;
+            min-width: unset;
+        }
+
+        .visited-location-popup__content {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            padding: 0.85rem 1rem;
+            direction: rtl;
+            text-align: right;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
+        .visited-location-popup__title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #1f2937;
+            margin: 0;
+            text-align: right;
+        }
+
+        .visited-location-popup__stats {
+            display: grid;
+            gap: 0.5rem;
+            margin: 0;
+            text-align: right;
+        }
+
+        .visited-location-popup__stats div {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+            color: #1f2937;
+        }
+
+        .visited-location-popup__stats dt {
+            font-weight: 500;
+            color: #1f2937;
+        }
+
+        .visited-location-popup__stats dd {
+            margin: 0;
+            font-weight: 600;
+            color: #2563eb;
+        }
+
         .map-location-label {
             background: rgba(37, 99, 235, 0.92);
             color: #fff;
@@ -476,7 +537,7 @@
     <!-- Main Screen -->
     <div id="main-screen" class="flex flex-col flex-1 min-h-0">
         <!-- Header -->
-        <header class="bg-white shadow-md p-4 z-30">
+        <header id="main-header" class="bg-white shadow-md p-4 z-30">
             <div class="flex flex-col items-center gap-2">
                 <h1 class="text-2xl font-bold text-center text-blue-600">!תפוס מקום</h1>
                 <div id="live-status-pill" class="live-stream-pill live-mode-receive" role="status" aria-live="polite">
@@ -488,7 +549,7 @@
         </header>
         
         <!-- Tab Navigation -->
-        <nav class="bg-white shadow-sm z-20">
+        <nav id="tab-navigation" class="bg-white shadow-sm z-20">
             <div class="flex justify-around max-w-lg mx-auto">
                 <button id="tab-btn-map" class="tab-btn active w-full py-3 font-semibold text-gray-600" onclick="switchTab('map')">מפה</button>
                 <button id="tab-btn-locations" class="tab-btn w-full py-3 font-semibold text-gray-600" onclick="switchTab('locations')">המקומות שלי</button>
@@ -496,15 +557,15 @@
         </nav>
 
         <!-- Main Content -->
-        <main class="flex-1 relative overflow-hidden min-h-0">
+        <main class="flex-1 relative overflow-visible min-h-0">
             
             <!-- Map Tab -->
             <div id="tab-content-map" class="tab-content active h-full w-full">
                 <!-- Map Container -->
                 <div id="map" class="h-full w-full" style="z-index: 10;"></div>
-                
+
                 <!-- Search Bar -->
-                <div class="absolute top-4 left-4 right-4 z-20 bg-white p-2 rounded-lg shadow-lg flex gap-2">
+                <div id="map-search-bar" class="absolute top-4 left-4 right-4 z-20 bg-white p-2 rounded-lg shadow-lg flex gap-2">
                     <input type="text" id="location-name-input" class="flex-1 w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="חפש שם מקום...">
                     <button id="search-btn" class="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 transition">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
