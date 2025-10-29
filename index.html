@@ -376,11 +376,12 @@
         let checkInStartTime = null; // Timestamp
         let checkInTimerInterval = null;
         let gpsCountdownInterval = null;
-        let userIcon; 
+        let userIcon;
         let miniMap, miniMapTargetMarker, miniMapUserMarker;
         let lastGpsTime = null;
         let lastKnownPosition = null;
         let confirmationCooldownUntil = null; // Cooldown for arrival confirmation
+        let visitedLocationsLayer;
 
         // --- IMPORTANT API KEY ---
         // The Gemini API features will not work without a valid API key.
@@ -490,10 +491,11 @@
             
             document.getElementById(`tab-content-${tabName}`).classList.add('active');
             document.getElementById(`tab-btn-${tabName}`).classList.add('active');
-            
+
             if (tabName === 'locations') {
                 renderAllLocations();
             } else if (tabName === 'map') {
+                renderVisitedLocationsOnMap();
                 // Invalidate map size to fix potential rendering issues
                 setTimeout(() => map.invalidateSize(), 0);
             }
@@ -504,11 +506,13 @@
             map = L.map('map', {
                 zoomControl: false // Disable default zoom
             }).setView([32.0853, 34.7818], 13); // Default to Tel Aviv
-            
+
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             }).addTo(map);
-            
+
+            visitedLocationsLayer = L.layerGroup().addTo(map);
+
             // Add zoom control to bottom-right
             L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -519,6 +523,8 @@
                 locationNameInput.value = targetName;
                 selectLocation(lat, lng, targetName);
             });
+
+            renderVisitedLocationsOnMap();
         }
 
         async function handleSearchLocation() {
@@ -550,6 +556,8 @@
                 searchBtn.disabled = false;
                 searchBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" /></svg>`;
             }
+
+            renderVisitedLocationsOnMap();
         }
 
         function selectLocation(lat, lon, name, id = null) {
@@ -578,14 +586,14 @@
                 switchTab('map');
             }
         }
-        
+
         function showLocationCard(name, id) {
             const db = getDb();
             const locationData = db[id] || { totalCheckIns: 0, avgWaitSeconds: 0 };
-            
-            const avgMinutes = Math.floor(locationData.avgWaitSeconds / 60);
-            const avgSeconds = Math.round(locationData.avgWaitSeconds % 60).toString().padStart(2, '0');
-            const avgTimeDisplay = locationData.totalCheckIns > 0 ? `${avgMinutes}:${avgSeconds} דקות` : "אין עדיין מידע";
+
+            const avgTimeDisplay = locationData.totalCheckIns > 0
+                ? `${formatDuration(locationData.avgWaitSeconds)} דקות`
+                : "אין עדיין מידע";
 
             targetDetailsCard.innerHTML = `
                 <h3 class="font-bold text-lg mb-2">${name}</h3>
@@ -932,21 +940,36 @@
 
         function saveWaitTime(id, name, coords, waitSeconds) {
             const db = getDb();
-            const locationData = db[id] || { 
+            const locationData = db[id] || {
                 name: name,
                 coords: coords,
-                totalCheckIns: 0, 
-                totalWaitSeconds: 0, 
-                avgWaitSeconds: 0 
+                totalCheckIns: 0,
+                totalWaitSeconds: 0,
+                avgWaitSeconds: 0,
+                visits: []
             };
 
             locationData.totalCheckIns += 1;
             locationData.totalWaitSeconds += waitSeconds;
             locationData.avgWaitSeconds = locationData.totalWaitSeconds / locationData.totalCheckIns;
 
+            if (!Array.isArray(locationData.visits)) {
+                locationData.visits = [];
+            }
+
+            locationData.visits.unshift({
+                timestamp: new Date().toISOString(),
+                waitSeconds: waitSeconds
+            });
+
+            // Keep only the most recent 20 visits to avoid unlimited growth
+            locationData.visits = locationData.visits.slice(0, 20);
+
             db[id] = locationData;
             saveDb(db);
-            
+
+            renderVisitedLocationsOnMap();
+
             // Re-render location list if tab is open
             if (document.getElementById('tab-content-locations').classList.contains('active')) {
                 renderAllLocations();
@@ -957,7 +980,7 @@
         function renderAllLocations() {
             const db = getDb();
             const locations = Object.entries(db);
-            
+
             if (locations.length === 0) {
                 allLocationsList.innerHTML = `<p class="text-gray-500 text-center">עדיין לא שמרתם מקומות...</p>`;
                 return;
@@ -969,16 +992,17 @@
             locations.sort(([, a], [, b]) => b.totalCheckIns - a.totalCheckIns);
             
             for (const [id, data] of locations) {
-                const avgMinutes = Math.floor(data.avgWaitSeconds / 60);
-                const avgSeconds = Math.round(data.avgWaitSeconds % 60).toString().padStart(2, '0');
-                
+                const avgTimeDisplay = data.totalCheckIns > 0
+                    ? `${formatDuration(data.avgWaitSeconds)} דקות`
+                    : "אין עדיין מידע";
+
                 const el = document.createElement('div');
                 el.className = "bg-white p-4 rounded-lg shadow-md border";
                 el.innerHTML = `
                     <div class="flex justify-between items-start">
                         <div>
                             <h3 class="font-semibold text-lg text-gray-800">${data.name}</h3>
-                            <p class="text-sm text-gray-600">זמן המתנה ממוצע: <span class="font-medium text-blue-600">${avgMinutes}:${avgSeconds}</span></p>
+                            <p class="text-sm text-gray-600">זמן המתנה ממוצע: <span class="font-medium text-blue-600">${avgTimeDisplay}</span></p>
                             <p class="text-sm text-gray-600">סה"כ צ'ק-אינים: <span class="font-medium text-blue-600">${data.totalCheckIns}</span></p>
                         </div>
                         <button class="goto-location-btn text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
@@ -993,6 +1017,94 @@
                 
                 allLocationsList.appendChild(el);
             }
+        }
+
+        function renderVisitedLocationsOnMap() {
+            if (!map) return;
+
+            if (!visitedLocationsLayer) {
+                visitedLocationsLayer = L.layerGroup().addTo(map);
+            }
+
+            visitedLocationsLayer.clearLayers();
+
+            const db = getDb();
+
+            for (const [, data] of Object.entries(db)) {
+                if (!data || !data.coords || !data.totalCheckIns) continue;
+
+                const rawLat = data.coords.lat ?? data.coords.latitude;
+                const rawLon = data.coords.lon ?? data.coords.lng ?? data.coords.longitude;
+
+                const lat = typeof rawLat === 'number' ? rawLat : parseFloat(rawLat);
+                const lon = typeof rawLon === 'number' ? rawLon : parseFloat(rawLon);
+
+                if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+
+                const marker = L.marker([lat, lon]).addTo(visitedLocationsLayer);
+                L.circle([lat, lon], {
+                    radius: 10,
+                    color: '#2563eb',
+                    weight: 1.5,
+                    fillColor: '#60a5fa',
+                    fillOpacity: 0.2
+                }).addTo(visitedLocationsLayer);
+
+                const visitList = Array.isArray(data.visits) ? data.visits : [];
+                const recentVisits = visitList.slice(0, 3);
+
+                let popupContent = `
+                    <div dir="rtl" style="text-align: right;">
+                        <div style="font-weight: 600; margin-bottom: 0.25rem;">${data.name}</div>
+                        <div style="font-size: 0.875rem;">צ'ק-אינים: <strong>${data.totalCheckIns}</strong></div>
+                        <div style="font-size: 0.875rem;">זמן המתנה ממוצע: <strong>${formatDuration(data.avgWaitSeconds)} דקות</strong></div>
+                `;
+
+                if (recentVisits.length > 0) {
+                    const visitsHtml = recentVisits
+                        .map((visit) => {
+                            const waitTime = formatDuration(visit.waitSeconds);
+                            const when = formatTimestamp(visit.timestamp);
+                            return `<li style="margin: 0.25rem 0;">${when} · ${waitTime} דקות</li>`;
+                        })
+                        .join('');
+
+                    popupContent += `
+                        <div style="margin-top: 0.5rem; font-size: 0.8125rem;">
+                            <div style="font-weight: 600;">ביקורים אחרונים:</div>
+                            <ul style="padding-right: 1rem; margin: 0; list-style: disc;">${visitsHtml}</ul>
+                        </div>
+                    `;
+                }
+
+                popupContent += '</div>';
+
+                marker.bindPopup(popupContent);
+            }
+        }
+
+        function formatDuration(seconds) {
+            const numericSeconds = Number(seconds);
+            if (!Number.isFinite(numericSeconds) || numericSeconds < 0) return '00:00';
+
+            const totalSeconds = Math.round(numericSeconds);
+            const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+            const secs = Math.abs(totalSeconds % 60).toString().padStart(2, '0');
+            return `${minutes}:${secs}`;
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return 'לא ידוע';
+
+            const date = new Date(timestamp);
+            if (Number.isNaN(date.getTime())) return 'לא ידוע';
+
+            return date.toLocaleString('he-IL', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
         }
 
         // --- 9. Gemini API ---
