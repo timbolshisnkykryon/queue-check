@@ -514,7 +514,7 @@
                 </div>
 
                 <!-- Target Details Card (Hidden by default) -->
-                <div id="target-details-card" class="absolute right-4 left-4 z-20 p-4 bg-white rounded-xl shadow-2xl transition-all duration-300 translate-y-full max-h-[70vh] overflow-y-auto bottom-safe">
+                <div id="target-details-card" class="absolute right-4 left-4 z-20 p-4 bg-white rounded-xl shadow-2xl transition-all duration-300 translate-y-full max-h-[50vh] overflow-y-auto bottom-safe sm:left-auto sm:w-[min(92vw,420px)]">
                     <!-- Card content is set dynamically by JS -->
                 </div>
             </div>
@@ -1131,7 +1131,9 @@
             const hasIntel = hasIntelData(locationData.intel);
             const intelPreviewHtml = renderIntelPreviewHtml(locationData.intel, {
                 emptyMessage: 'היו הראשונים לקבל סקירה למיקום זה באמצעות Gemini כאשר תבצעו צ\'ק-אין.',
-                textClass: 'text-xs text-gray-500 mt-2'
+                textClass: 'text-xs text-gray-500 mt-2',
+                summaryClass: 'text-sm text-blue-900/90 leading-relaxed',
+                maxLength: 220
             });
 
             targetDetailsCard.innerHTML = `
@@ -2220,7 +2222,7 @@
                 marker.bindTooltip(locationName, {
                     permanent: true,
                     direction: 'top',
-                    offset: [0, -10],
+                    offset: [0, -4],
                     opacity: 1,
                     className: 'map-location-label'
                 });
@@ -2346,9 +2348,58 @@
             return '';
         }
 
+        function getIntelTextContent(intel) {
+            if (!intel || typeof intel !== 'object') {
+                return '';
+            }
+
+            if (typeof intel.text === 'string' && intel.text.trim().length > 0) {
+                return intel.text.trim();
+            }
+
+            if (typeof intel.html === 'string' && intel.html.trim().length > 0) {
+                return intel.html
+                    .replace(/<br\s*\/?>/gi, '\n')
+                    .replace(/<li[^>]*>/gi, '\n')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            }
+
+            return '';
+        }
+
+        function getIntelSummaryText(intel, options = {}) {
+            const limit = Math.max(1, options.sentences ?? 2);
+            const maxChars = Math.max(60, options.maxLength ?? 320);
+            const textContent = getIntelTextContent(intel);
+
+            if (!textContent) {
+                return '';
+            }
+
+            const normalized = textContent.replace(/\s+/g, ' ').trim();
+            if (!normalized) {
+                return '';
+            }
+
+            const sentences = normalized.split(/(?<=[.!?\u05be\u2022])\s+/).filter(Boolean);
+            let summary = sentences.slice(0, limit).join(' ');
+
+            if (!summary) {
+                summary = normalized;
+            }
+
+            if (summary.length > maxChars) {
+                return `${summary.slice(0, maxChars).trim()}…`;
+            }
+
+            return summary;
+        }
+
         function renderIntelPreviewHtml(intel, options = {}) {
-            const html = getIntelHtml(intel);
-            if (!html) {
+            const summary = getIntelSummaryText(intel, options);
+            if (!summary) {
                 const emptyMessage = options.emptyMessage || '';
                 if (!emptyMessage) {
                     return '';
@@ -2357,7 +2408,8 @@
                 return `<p class="${textClass}">${emptyMessage}</p>`;
             }
 
-            return html;
+            const summaryClass = options.summaryClass || options.textClass || 'text-sm text-blue-900/90 leading-relaxed';
+            return `<p class="${summaryClass}">${escapeHtml(summary)}</p>`;
         }
 
         function renderIntelIntoContainer(container, intel, options = {}) {
@@ -2617,13 +2669,13 @@
             // --- End Check ---
 
             const prettyName = targetName || cachedLocation?.name || 'המיקום';
-            const userQuery = `כתוב סקירה תמציתית בעברית על המיקום (${prettyName}) שנמצא בקואורדינטות ${targetCoords.lat}, ${targetCoords.lon}. כלול תיאור רקע קצר, מאפיינים חשובים, טיפים לביקור ושעות פעילות אם זמינות. סדר את המידע כך: שורת כותרת קצרה, אחריה 3-5 נקודות שמתחילות במקף (-) עם פרטים ממוקדים.`;
+            const userQuery = `הכן תגובה תמציתית בעברית עבור המיקום "${prettyName}" שבקואורדינטות ${targetCoords.lat}, ${targetCoords.lon}. שמור על הפורמט הבא:\nתקציר: משפט אחד עד שניים בלבד עם המידע החשוב ביותר למבקר.\nעיקרי מידע:\n- מאפיין חשוב או רקע קצר (אם ידוע).\n- טיפ ביקור פרקטי (אם רלוונטי).\n- שעות פעילות או זמינות (אם יש מידע).\nהימנע מחזרות או מילים מיותרות.`;
 
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
                 tools: [{ "google_search": {} }],
                 systemInstruction: {
-                    parts: [{ text: "הנך מדריך שטח ישראלי. השב תמיד בעברית מודרנית, ברורה ומכבדת. שמור על טון אינפורמטיבי, הימנע מטקסט שיווקי, וספק עובדות עדכניות ופרקטיות. פתח בכותרת קצרה ואז רשימת נקודות מתחילות במקף." }]
+                    parts: [{ text: "הנך מדריך שטח ישראלי. השב תמיד בעברית מודרנית, ברורה ומכבדת. שמור על טון אינפורמטיבי, הימנע מטקסט שיווקי, ועמוד במגבלת אורך קצרה. תמיד התחל בסעיף \"תקציר\" בן משפט אחד עד שניים, ואחריו רשימת נקודות ממוקדות (עד שלוש). אם אין מידע עבור סעיף מסוים, ציין \"לא ידוע\" במקום להשאיר ריק." }]
                 },
             };
 
