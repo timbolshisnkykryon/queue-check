@@ -1631,7 +1631,7 @@ function getVisitedLocationPopupOptions() {
     const fallbackOptions = {
         maxWidth: 240,
         minWidth: 180,
-        autoPanPadding: typeof L !== 'undefined' && L?.point ? L.point(24, 24) : [24, 24]
+        autoPanPadding: typeof L !== 'undefined' && L?.point ? L.point(24, 32) : [24, 32]
     };
 
     if (!map || typeof map.getSize !== 'function') {
@@ -1640,6 +1640,7 @@ function getVisitedLocationPopupOptions() {
 
     const mapSize = map.getSize();
     const mapWidth = Number.isFinite(mapSize?.x) && mapSize.x > 0 ? mapSize.x : 0;
+    const mapHeight = Number.isFinite(mapSize?.y) && mapSize.y > 0 ? mapSize.y : 0;
 
     if (mapWidth <= 0) {
         return fallbackOptions;
@@ -1655,9 +1656,10 @@ function getVisitedLocationPopupOptions() {
     const minWidth = Math.min(Math.max(120, suggestedMin), maxWidth);
 
     const horizontalPadding = Math.max(16, Math.floor(mapWidth * 0.05));
+    const verticalPadding = Math.max(32, Math.floor(mapHeight * 0.15));
     const autoPanPadding = typeof L !== 'undefined' && L?.point
-        ? L.point(horizontalPadding, 24)
-        : [horizontalPadding, 24];
+        ? L.point(horizontalPadding, verticalPadding)
+        : [horizontalPadding, verticalPadding];
 
     return {
         maxWidth,
