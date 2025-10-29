@@ -1,0 +1,33 @@
+export function createAppState() {
+    return {
+        map: null,
+        userMarker: null,
+        targetMarker: null,
+        targetCircle: null,
+        targetCoords: null,
+        targetName: '',
+        currentLocationId: null,
+        gpsWatcherId: null,
+        checkInStartTime: null,
+        checkInTimerInterval: null,
+        gpsCountdownInterval: null,
+        userIcon: null,
+        miniMap: null,
+        miniMapTargetMarker: null,
+        miniMapUserMarker: null,
+        lastGpsTime: null,
+        lastKnownPosition: null,
+        confirmationCooldownUntil: null,
+        visitedLocationsLayer: null,
+        isSavingCheckIn: false,
+        liveStatusTimeoutId: null,
+        waitingSyncHideTimeoutId: null,
+        renameLocationPendingId: null,
+        isRenamingLocation: false,
+        firebaseAppInstance: null,
+        firestoreDb: null,
+        unsubscribeLocations: null,
+        locationsLoaded: false,
+        firebaseInitializationError: null
+    };
+}
