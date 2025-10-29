@@ -1589,6 +1589,15 @@ function renderVisitedLocationsOnMap() {
 
         const locationName = data.name || `מיקום (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
 
+        const popupOptions = getVisitedLocationPopupOptions();
+        const popupContent = buildVisitedLocationPopupContent({
+            id,
+            name: locationName,
+            totalCheckIns: data.totalCheckIns,
+            avgWaitSeconds: data.avgWaitSeconds,
+            lastVisitAt: data?.visits?.[0]?.timestamp ?? data?.lastUpdatedAt ?? null
+        }, popupOptions);
+
         marker.bindTooltip(locationName, {
             permanent: true,
             direction: 'top',
@@ -1597,15 +1606,120 @@ function renderVisitedLocationsOnMap() {
             className: 'map-location-label'
         });
 
+        marker.bindPopup(popupContent, {
+            maxWidth: popupOptions.maxWidth,
+            minWidth: popupOptions.minWidth,
+            autoPan: true,
+            autoPanPadding: popupOptions.autoPanPadding,
+            closeButton: true,
+            className: 'visited-location-popup'
+        });
+
         marker.on('click', () => {
             if (locationNameInput) {
                 locationNameInput.value = locationName;
             }
             selectLocation(lat, lon, locationName, id);
+            marker.openPopup();
         });
     }
 
     updateState();
+}
+
+function getVisitedLocationPopupOptions() {
+    const fallbackOptions = {
+        maxWidth: 240,
+        minWidth: 180,
+        autoPanPadding: typeof L !== 'undefined' && L?.point ? L.point(24, 24) : [24, 24]
+    };
+
+    if (!map || typeof map.getSize !== 'function') {
+        return fallbackOptions;
+    }
+
+    const mapSize = map.getSize();
+    const mapWidth = Number.isFinite(mapSize?.x) && mapSize.x > 0 ? mapSize.x : 0;
+
+    if (mapWidth <= 0) {
+        return fallbackOptions;
+    }
+
+    const halfWidth = Math.max(1, Math.floor(mapWidth * 0.5));
+    const maxWidth = Math.max(
+        Math.min(halfWidth, 360),
+        Math.min(halfWidth, 160)
+    );
+
+    const suggestedMin = Math.max(Math.floor(mapWidth * 0.35), 140);
+    const minWidth = Math.min(Math.max(120, suggestedMin), maxWidth);
+
+    const horizontalPadding = Math.max(16, Math.floor(mapWidth * 0.05));
+    const autoPanPadding = typeof L !== 'undefined' && L?.point
+        ? L.point(horizontalPadding, 24)
+        : [horizontalPadding, 24];
+
+    return {
+        maxWidth,
+        minWidth,
+        autoPanPadding
+    };
+}
+
+function buildVisitedLocationPopupContent(locationData, popupOptions = {}) {
+    const totalCheckIns = Number.isFinite(Number(locationData.totalCheckIns))
+        ? Number(locationData.totalCheckIns)
+        : 0;
+
+    const avgWaitSeconds = Number.isFinite(Number(locationData.avgWaitSeconds)) && Number(locationData.avgWaitSeconds) > 0
+        ? Number(locationData.avgWaitSeconds)
+        : null;
+
+    const lastVisitAt = locationData.lastVisitAt || null;
+
+    const totalCheckInsText = totalCheckIns > 0
+        ? totalCheckIns.toLocaleString('he-IL')
+        : '—';
+
+    const avgWaitText = avgWaitSeconds
+        ? formatDuration(avgWaitSeconds)
+        : 'לא זמין';
+
+    const lastVisitText = lastVisitAt
+        ? formatTimestamp(lastVisitAt)
+        : 'לא נרשם';
+
+    const styleAttributes = [];
+    if (popupOptions.minWidth) {
+        styleAttributes.push(`min-width:${popupOptions.minWidth}px`);
+    }
+    if (popupOptions.maxWidth) {
+        styleAttributes.push(`max-width:${popupOptions.maxWidth}px`);
+    }
+
+    const styleAttribute = styleAttributes.length > 0
+        ? ` style="${styleAttributes.join(';')}"`
+        : '';
+
+    return `
+        <div class="visited-location-popup__content"${styleAttribute}>
+            <h3 class="visited-location-popup__title">${escapeHtml(locationData.name || 'מיקום ללא שם')}</h3>
+            <dl class="visited-location-popup__stats">
+                <div>
+                    <dt>סה"כ ביקורים</dt>
+                    <dd>${escapeHtml(totalCheckInsText)}</dd>
+                </div>
+                <div>
+                    <dt>המתנה ממוצעת</dt>
+                    <dd>${escapeHtml(avgWaitText)}</dd>
+                </div>
+                <div>
+                    <dt>ביקור אחרון</dt>
+                    <dd>${escapeHtml(lastVisitText)}</dd>
+                </div>
+            </dl>
+        </div>
+    `;
 }
 
 function formatDuration(seconds) {
