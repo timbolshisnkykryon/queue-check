@@ -111,6 +111,12 @@ export function initializeApplication(context) {
         tabButtons
     } = elements;
 
+    if (gpsCountdownEl) {
+        gpsCountdownEl.textContent = '';
+        gpsCountdownEl.setAttribute('aria-hidden', 'true');
+        gpsCountdownEl.style.setProperty('display', 'none', 'important');
+    }
+
     const POPUP_VISIBILITY_ATTEMPT_KEY = '__queueCheckPopupEnsureAttempts';
     const DEFAULT_VISIBILITY_PADDING = Object.freeze({
         top: 32,
@@ -861,33 +867,11 @@ function handleGpsError(error) {
 
 function startGpsCountdown() {
     if (gpsCountdownInterval) clearInterval(gpsCountdownInterval);
-    if (!checkInStartTime) {
-        gpsCountdownEl.textContent = "";
-        return;
+    gpsCountdownInterval = null;
+
+    if (gpsCountdownEl) {
+        gpsCountdownEl.textContent = '';
     }
-
-    let secondsLeft = 5; // 5 second timeout
-
-    const updateCountdown = () => {
-        if (!checkInStartTime) { // Check if check-in was cancelled
-             clearInterval(gpsCountdownInterval);
-             gpsCountdownEl.textContent = "";
-             return;
-        }
-
-        const sinceLastUpdate = (Date.now() - lastGpsTime) / 1000;
-        secondsLeft = Math.max(0, 5 - sinceLastUpdate);
-
-        gpsCountdownEl.textContent = `(עדכון בעוד ${secondsLeft.toFixed(0)} ש')`;
-
-        if (secondsLeft <= 0) {
-            clearInterval(gpsCountdownInterval);
-            gpsCountdownEl.textContent = "(ממתין לעדכון...)";
-        }
-    };
-
-    updateCountdown(); // Run immediately
-    gpsCountdownInterval = setInterval(updateCountdown, 500);
 
     updateState();
 }
