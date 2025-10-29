@@ -1340,20 +1340,27 @@
                                 <p class="text-sm text-gray-600">סה"כ צ'ק-אינים: <span class="font-medium text-blue-600">${data.totalCheckIns}</span></p>
                                 <p class="text-xs text-gray-500">שעה נוכחית (${currentDayLabel} · ${formatHourLabel(hourIndex)}): <span class="font-semibold text-blue-600">${currentHourStats.label}</span></p>
                             </div>
-                            <button class="goto-location-btn self-start text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
-                                עבור למיקום
-                            </button>
-                        </div>
-                        <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
-                            <div class="flex items-center justify-between text-xs sm:text-sm text-blue-900 font-semibold">
-                                <span>היום לפי שעות</span>
-                                <span>${currentHourStats.hasData ? currentHourStats.label : 'אין נתונים לשעה זו'}</span>
+                            <div class="flex items-center gap-2 self-start">
+                                <button type="button" class="toggle-details-btn text-sm bg-gray-100 text-gray-700 font-semibold py-2 px-3 rounded-md hover:bg-gray-200 transition" aria-expanded="false">
+                                    הצג פרטים
+                                </button>
+                                <button class="goto-location-btn text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
+                                    עבור למיקום
+                                </button>
                             </div>
-                            ${hourlyChartHtml}
                         </div>
-                        <div>
-                            <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
-                            ${weeklySummaryHtml}
+                        <div class="location-details space-y-4 hidden">
+                            <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                                <div class="flex items-center justify-between text-xs sm:text-sm text-blue-900 font-semibold">
+                                    <span>היום לפי שעות</span>
+                                    <span>${currentHourStats.hasData ? currentHourStats.label : 'אין נתונים לשעה זו'}</span>
+                                </div>
+                                ${hourlyChartHtml}
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
+                                ${weeklySummaryHtml}
+                            </div>
                         </div>
                     </div>
                 `;
@@ -1365,6 +1372,16 @@
                     if (lat == null || lon == null) return;
                     selectLocation(lat, lon, data.name, id);
                 });
+
+                const toggleBtn = el.querySelector('.toggle-details-btn');
+                const detailsSection = el.querySelector('.location-details');
+                if (toggleBtn && detailsSection) {
+                    toggleBtn.addEventListener('click', () => {
+                        const isHidden = detailsSection.classList.toggle('hidden');
+                        toggleBtn.textContent = isHidden ? 'הצג פרטים' : 'הסתר פרטים';
+                        toggleBtn.setAttribute('aria-expanded', String(!isHidden));
+                    });
+                }
 
                 allLocationsList.appendChild(el);
             }
@@ -1425,7 +1442,12 @@
 
                 let popupContent = `
                     <div dir="rtl" style="text-align: right; max-width: 260px;">
-                        <div style="font-weight: 600; margin-bottom: 0.25rem; font-size: 0.95rem;">${data.name}</div>
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.75rem; margin-bottom:0.35rem;">
+                            <div style="font-weight: 600; font-size: 0.95rem;">${data.name}</div>
+                            <button type="button" class="map-popup-close-btn" aria-label="סגירת חלון מידע" title="סגירה" style="border: none; background: #eff6ff; color: #1d4ed8; border-radius: 999px; width: 1.6rem; height: 1.6rem; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; cursor: pointer;">
+                                ×
+                            </button>
+                        </div>
                         <div style="font-size: 0.82rem;">צ'ק-אינים: <strong>${data.totalCheckIns}</strong></div>
                         <div style="font-size: 0.82rem;">זמן המתנה ממוצע: <strong>${averageWaitLabel}</strong></div>
                         <div style="margin-top: 0.5rem; font-size: 0.75rem;">
@@ -1461,7 +1483,16 @@
 
                 popupContent += '</div>';
 
-                marker.bindPopup(popupContent);
+                marker.bindPopup(popupContent, { closeButton: false });
+                marker.on('popupopen', (event) => {
+                    const popupEl = event.popup.getElement();
+                    if (!popupEl) return;
+                    const closeBtn = popupEl.querySelector('.map-popup-close-btn');
+                    if (!closeBtn) return;
+                    closeBtn.addEventListener('click', () => {
+                        map.closePopup(event.popup);
+                    });
+                });
             }
         }
 
