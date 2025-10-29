@@ -31,9 +31,40 @@
 
     <style>
         /* Base styling */
+        html, body {
+            height: 100%;
+        }
+
+        :root {
+            --safe-area-top: env(safe-area-inset-top, 0px);
+            --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
         body {
             font-family: 'Rubik', 'Inter', sans-serif;
             overscroll-behavior: none; /* Prevents pull-to-refresh */
+            min-height: 100vh;
+            padding-top: var(--safe-area-top);
+            padding-bottom: var(--safe-area-bottom);
+        }
+
+        @supports (height: 100dvh) {
+            body {
+                min-height: 100dvh;
+            }
+        }
+
+        #main-screen {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 auto;
+        }
+
+        @supports (height: 100dvh) {
+            #main-screen {
+                min-height: 100dvh;
+            }
         }
         
         /* Custom User Icon for Leaflet */
@@ -91,7 +122,7 @@
         .tab-content.active {
             display: block;
         }
-        
+
         /* Floating Card Animation */
         @keyframes floatIn {
             from {
@@ -115,14 +146,26 @@
         .timer-pulse {
             animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
+
+        .safe-bottom-space {
+            padding-bottom: calc(1.5rem + var(--safe-area-bottom));
+        }
+
+        .safe-bottom-pad {
+            padding-bottom: var(--safe-area-bottom);
+        }
+
+        .bottom-safe {
+            bottom: calc(1rem + var(--safe-area-bottom));
+        }
     </style>
 </head>
-<body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
+<body class="bg-gray-100 min-h-screen flex flex-col overflow-x-hidden">
 
     <!-- Onboarding Modal -->
-    <div id="onboarding-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div class="p-6 relative">
+    <div id="onboarding-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto" style="padding-top: calc(1rem + var(--safe-area-top)); padding-bottom: calc(1rem + var(--safe-area-bottom));">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-6 relative overflow-y-auto">
                 <!-- Progress Bar -->
                 <div class="w-full bg-gray-200 rounded-full h-2.5 mb-4">
                     <div id="onboarding-progress" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 33%"></div>
@@ -166,7 +209,7 @@
     </div>
 
     <!-- Main Screen -->
-    <div id="main-screen" class="flex flex-col h-full">
+    <div id="main-screen" class="flex flex-col flex-1 min-h-0">
         <!-- Header -->
         <header class="bg-white shadow-md p-4 z-30">
             <h1 class="text-2xl font-bold text-center text-blue-600">!תפוס מקום</h1>
@@ -181,7 +224,7 @@
         </nav>
 
         <!-- Main Content -->
-        <main class="flex-1 overflow-hidden relative">
+        <main class="flex-1 relative overflow-hidden min-h-0">
             
             <!-- Map Tab -->
             <div id="tab-content-map" class="tab-content active h-full w-full">
@@ -199,14 +242,14 @@
                 </div>
 
                 <!-- NEW: GPS Status Button -->
-                <div class="absolute bottom-4 left-4 z-20">
+                <div class="absolute left-4 z-20 bottom-safe">
                     <button id="gps-status-btn" class="bg-white p-3 rounded-lg shadow-lg text-sm text-gray-600 font-medium text-right transition-all hover:bg-gray-50 active:scale-95 disabled:opacity-80 disabled:active:scale-100 disabled:hover:bg-white cursor-default disabled:cursor-not-allowed">
                         מאתר מיקום GPS...
                     </button>
                 </div>
-                
+
                 <!-- Target Details Card (Hidden by default) -->
-                <div id="target-details-card" class="absolute bottom-4 right-4 left-4 z-20 p-4 bg-white rounded-xl shadow-2xl transition-all duration-300 translate-y-full">
+                <div id="target-details-card" class="absolute right-4 left-4 z-20 p-4 bg-white rounded-xl shadow-2xl transition-all duration-300 translate-y-full max-h-[70vh] overflow-y-auto bottom-safe">
                     <!-- Card content is set dynamically by JS -->
                 </div>
             </div>
@@ -223,7 +266,7 @@
     </div>
 
     <!-- Check-in "Waiting" Screen -->
-    <div id="waiting-screen" class="fixed inset-0 bg-gradient-to-br from-gray-900 to-gray-800 text-white z-40 p-6 flex-col h-full w-full overflow-y-auto hidden">
+    <div id="waiting-screen" class="fixed inset-0 bg-gradient-to-br from-gray-900 to-gray-800 text-white z-40 p-6 flex flex-col min-h-full w-full overflow-y-auto hidden" style="padding-top: calc(1.5rem + var(--safe-area-top)); padding-bottom: calc(1.5rem + var(--safe-area-bottom));">
         
         <!-- Header -->
         <div class="flex-shrink-0">
@@ -277,7 +320,7 @@
         </div>
 
         <!-- Footer Buttons -->
-        <div class="flex-shrink-0 w-full max-w-md mx-auto space-y-3 pt-4">
+        <div class="flex-shrink-0 w-full max-w-md mx-auto space-y-3 pt-4 safe-bottom-space">
             <button id="manual-finish-btn" class="w-full bg-yellow-500 text-black font-bold py-3 px-4 rounded-md hover:bg-yellow-400 transition">
                 סיום ידני ושמירה
             </button>
@@ -288,8 +331,8 @@
     </div>
 
     <!-- Success Message -->
-    <div id="success-message" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4 hidden">
-        <div class="bg-white rounded-lg shadow-2xl p-6 text-center max-w-sm mx-auto float-in">
+    <div id="success-message" class="fixed inset-0 bg-black bg-opacity-75 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto hidden" style="padding-top: calc(1rem + var(--safe-area-top)); padding-bottom: calc(1rem + var(--safe-area-bottom));">
+        <div class="bg-white rounded-lg shadow-2xl p-6 text-center max-w-sm mx-auto float-in safe-bottom-pad">
             <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
@@ -302,8 +345,8 @@
     </div>
 
     <!-- Arrival Confirmation Modal -->
-    <div id="arrival-confirmation-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4 hidden">
-        <div class="bg-white rounded-lg shadow-2xl p-6 text-center max-w-sm mx-auto float-in">
+    <div id="arrival-confirmation-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto hidden" style="padding-top: calc(1rem + var(--safe-area-top)); padding-bottom: calc(1rem + var(--safe-area-bottom));">
+        <div class="bg-white rounded-lg shadow-2xl p-6 text-center max-w-sm mx-auto float-in safe-bottom-pad">
             <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
