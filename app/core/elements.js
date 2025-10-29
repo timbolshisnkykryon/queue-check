@@ -19,6 +19,7 @@ export function getElements() {
         waitingDistance: document.getElementById('waiting-distance'),
         waitingBearing: document.getElementById('waiting-bearing'),
         gpsCountdownEl: document.getElementById('gps-countdown-el'),
+        miniMapEl: document.getElementById('mini-map'),
         infoLoading: document.getElementById('info-loading'),
         infoResult: document.getElementById('info-result'),
         infoSources: document.getElementById('info-sources'),

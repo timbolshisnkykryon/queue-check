@@ -81,6 +81,7 @@ export function initializeApplication(context) {
         waitingDistance,
         waitingBearing,
         gpsCountdownEl,
+        miniMapEl,
         infoLoading,
         infoResult,
         infoSources,
