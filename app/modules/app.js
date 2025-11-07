@@ -1687,39 +1687,49 @@ function showLocationCard(name, id) {
                 </div>
             </div>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
-            <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
-                <div class="font-semibold text-gray-700">ממוצע כללי</div>
-                <div class="text-blue-600 font-semibold">${overallAverageDisplay}</div>
-            </div>
-            <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
-                <div class="font-semibold text-gray-700">סה"כ צ'ק-אינים</div>
-                <div class="text-blue-600 font-semibold">${locationData.totalCheckIns}</div>
-            </div>
-        </div>
-        <div class="bg-white border border-blue-100 rounded-lg p-3 mb-4">
-            <h4 class="text-sm font-semibold text-gray-700">ממוצע לפי שעה (היום)</h4>
-            ${hourlyChartHtml}
-        </div>
-        <details class="bg-white border border-gray-200 rounded-lg p-3 mb-4" ${weeklyHasData ? '' : 'open'}>
-            <summary class="flex flex-col gap-2 cursor-pointer text-sm font-semibold text-gray-700">
-                <span>מבט שבועי</span>
-                ${weeklyHasData ? `<div class="text-xs text-gray-600">${weeklySummaryPreviewHtml}</div>` : ''}
+        <details class="bg-white border border-gray-200 rounded-lg p-3 mb-4" data-testid="location-stats-toggle">
+            <summary class="flex items-center justify-between gap-2 cursor-pointer text-sm font-semibold text-gray-700">
+                <span>סטטיסטיקות</span>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-gray-500 transition-transform details-arrow">
+                    <path fill-rule="evenodd" d="M12 16a1 1 0 0 1-.707-.293l-5-5a1 1 0 1 1 1.414-1.414L12 13.586l4.293-4.293a1 1 0 1 1 1.414 1.414l-5 5A1 1 0 0 1 12 16Z" clip-rule="evenodd" />
+                </svg>
             </summary>
-            <div class="mt-3 text-sm text-gray-600 leading-relaxed">${weeklySummaryExpandedHtml}</div>
-        </details>
-        <div class="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-4">
-            <div class="flex items-center justify-between gap-3">
-                <div>
-                    <h4 class="text-sm font-semibold text-blue-900">סקירת יעד</h4>
-                    <p class="text-xs text-blue-700 opacity-80">מידע תמציתי לביקור חכם</p>
+            <div class="mt-3 flex flex-col gap-4 text-sm text-gray-600 leading-relaxed">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
+                        <div class="font-semibold text-gray-700">ממוצע כללי</div>
+                        <div class="text-blue-600 font-semibold">${overallAverageDisplay}</div>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
+                        <div class="font-semibold text-gray-700">סה"כ צ'ק-אינים</div>
+                        <div class="text-blue-600 font-semibold">${locationData.totalCheckIns}</div>
+                    </div>
                 </div>
-                ${hasIntel ? `<button type="button" class="open-intel-modal-btn text-xs font-semibold bg-blue-600 text-white rounded-full px-3 py-2 hover:bg-blue-700 transition">פתח סקירה מלאה</button>` : ''}
+                <div class="bg-white border border-blue-100 rounded-lg p-3">
+                    <h4 class="text-sm font-semibold text-gray-700">ממוצע לפי שעה (היום)</h4>
+                    ${hourlyChartHtml}
+                </div>
+                <details class="bg-white border border-gray-200 rounded-lg p-3" ${weeklyHasData ? '' : 'open'}>
+                    <summary class="flex flex-col gap-2 cursor-pointer text-sm font-semibold text-gray-700">
+                        <span>מבט שבועי</span>
+                        ${weeklyHasData ? `<div class="text-xs text-gray-600">${weeklySummaryPreviewHtml}</div>` : ''}
+                    </summary>
+                    <div class="mt-3 text-sm text-gray-600 leading-relaxed">${weeklySummaryExpandedHtml}</div>
+                </details>
+                <div class="bg-blue-50 border border-blue-100 rounded-lg p-4">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h4 class="text-sm font-semibold text-blue-900">סקירת יעד</h4>
+                            <p class="text-xs text-blue-700 opacity-80">מידע תמציתי לביקור חכם</p>
+                        </div>
+                        ${hasIntel ? `<button type="button" class="open-intel-modal-btn text-xs font-semibold bg-blue-600 text-white rounded-full px-3 py-2 hover:bg-blue-700 transition">פתח סקירה מלאה</button>` : ''}
+                    </div>
+                    <div class="mt-3 bg-white rounded-xl border border-blue-100/60 p-3 max-h-60 overflow-y-auto ${hasIntel ? 'intel-rich-text text-sm text-blue-900/90' : ''}">
+                        ${intelPreviewHtml}
+                    </div>
+                </div>
             </div>
-            <div class="mt-3 bg-white rounded-xl border border-blue-100/60 p-3 max-h-60 overflow-y-auto ${hasIntel ? 'intel-rich-text text-sm text-blue-900/90' : ''}">
-                ${intelPreviewHtml}
-            </div>
-        </div>
+        </details>
         <button id="start-check-in-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-md hover:bg-green-700 transition">
             התחל צ'ק-אין למקום
         </button>
