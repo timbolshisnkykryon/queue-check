@@ -49,6 +49,12 @@ export function initializeApplication(context) {
         lastKnownPosition,
         confirmationCooldownUntil,
         visitedLocationsLayer,
+        poiLayer,
+        poiRefreshTimeoutId,
+        poiFetchAbortController,
+        isLoadingPois,
+        lastPoiFetchBounds,
+        selectedPlaceInfo,
         isSavingCheckIn,
         liveStatusTimeoutId,
         waitingSyncHideTimeoutId,
@@ -146,6 +152,12 @@ export function initializeApplication(context) {
             lastKnownPosition,
             confirmationCooldownUntil,
             visitedLocationsLayer,
+            poiLayer,
+            poiRefreshTimeoutId,
+            poiFetchAbortController,
+            isLoadingPois,
+            lastPoiFetchBounds,
+            selectedPlaceInfo,
             isSavingCheckIn,
             liveStatusTimeoutId,
             waitingSyncHideTimeoutId,
@@ -395,6 +407,7 @@ function initMap() {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
+    poiLayer = L.layerGroup().addTo(map);
     visitedLocationsLayer = L.layerGroup().addTo(map);
 
     // Add zoom control to bottom-right
@@ -410,7 +423,516 @@ function initMap() {
 
     renderVisitedLocationsOnMap();
 
+    scheduleNearbyPlacesRefresh({ immediate: true });
+
+    map.on('moveend', handleMapMoveEnd);
+
     updateState();
+}
+
+function handleMapMoveEnd() {
+    scheduleNearbyPlacesRefresh();
+}
+
+function scheduleNearbyPlacesRefresh({ immediate = false } = {}) {
+    if (!map) {
+        return;
+    }
+
+    if (poiRefreshTimeoutId) {
+        clearTimeout(poiRefreshTimeoutId);
+        poiRefreshTimeoutId = null;
+    }
+
+    const triggerFetch = () => {
+        poiRefreshTimeoutId = null;
+        fetchNearbyPlaces().catch((error) => {
+            if (error?.name === 'AbortError') {
+                return;
+            }
+            console.error('Failed to refresh nearby places', error);
+        });
+    };
+
+    if (immediate) {
+        triggerFetch();
+    } else {
+        poiRefreshTimeoutId = setTimeout(triggerFetch, 450);
+    }
+
+    updateState();
+}
+
+async function fetchNearbyPlaces() {
+    if (!map) {
+        return;
+    }
+
+    if (poiFetchAbortController) {
+        poiFetchAbortController.abort();
+    }
+
+    const bounds = map.getBounds();
+    if (!bounds) {
+        return;
+    }
+
+    const zoomLevel = map.getZoom();
+    if (!Number.isFinite(zoomLevel) || zoomLevel < 12) {
+        if (poiLayer) {
+            poiLayer.clearLayers();
+        }
+        lastPoiFetchBounds = null;
+        updateState();
+        return;
+    }
+
+    const south = bounds.getSouth();
+    const west = bounds.getWest();
+    const north = bounds.getNorth();
+    const east = bounds.getEast();
+
+    if (![south, west, north, east].every((coord) => Number.isFinite(coord))) {
+        return;
+    }
+
+    const boundsSummary = {
+        south: Number(south.toFixed(5)),
+        west: Number(west.toFixed(5)),
+        north: Number(north.toFixed(5)),
+        east: Number(east.toFixed(5)),
+        zoom: Number(zoomLevel.toFixed(2))
+    };
+
+    lastPoiFetchBounds = boundsSummary;
+
+    poiFetchAbortController = new AbortController();
+    const signal = poiFetchAbortController.signal;
+
+    isLoadingPois = true;
+    updateState();
+
+    const query = buildOverpassPlacesQuery({ south, west, north, east });
+
+    try {
+        const response = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+            },
+            body: new URLSearchParams({ data: query }),
+            signal
+        });
+
+        if (!response.ok) {
+            throw new Error(`Overpass API responded with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (signal.aborted) {
+            return;
+        }
+
+        const elements = Array.isArray(data?.elements) ? data.elements : [];
+        renderPointsOfInterest(elements);
+    } catch (error) {
+        if (error?.name === 'AbortError') {
+            return;
+        }
+        console.error('Failed to fetch nearby places', error);
+    } finally {
+        if (poiFetchAbortController?.signal === signal) {
+            poiFetchAbortController = null;
+        }
+        isLoadingPois = false;
+        updateState();
+    }
+}
+
+function buildOverpassPlacesQuery({ south, west, north, east }) {
+    const bbox = [south, west, north, east]
+        .map((coord) => coord.toFixed(6))
+        .join(',');
+
+    return `
+[out:json][timeout:25];
+(
+  node["amenity"~"^(restaurant|cafe|bar|fast_food|pub|food_court|ice_cream|bakery|cinema|theatre|arts_centre|nightclub)$"](${bbox});
+  node["shop"~"^(supermarket|convenience|mall|department_store|clothes|shoes|electronics|books|gift|beauty)$"](${bbox});
+  node["tourism"~"^(museum|gallery|attraction)$"](${bbox});
+  way["amenity"~"^(restaurant|cafe|bar|fast_food|pub|food_court|ice_cream|bakery|cinema|theatre|arts_centre|nightclub)$"](${bbox});
+  way["shop"~"^(supermarket|convenience|mall|department_store)$"](${bbox});
+  way["tourism"~"^(museum|gallery|attraction)$"](${bbox});
+  rel["amenity"~"^(restaurant|cafe|bar|fast_food|pub|food_court|ice_cream|bakery|cinema|theatre|arts_centre|nightclub)$"](${bbox});
+  rel["shop"~"^(supermarket|convenience|mall|department_store)$"](${bbox});
+  rel["tourism"~"^(museum|gallery|attraction)$"](${bbox});
+);
+out center 120;
+`;
+}
+
+function renderPointsOfInterest(elements) {
+    if (!map) {
+        return;
+    }
+
+    if (!poiLayer) {
+        poiLayer = L.layerGroup().addTo(map);
+    }
+
+    poiLayer.clearLayers();
+
+    const uniqueElements = new Map();
+    for (const element of elements) {
+        if (!element || typeof element.id === 'undefined') {
+            continue;
+        }
+        const key = `${element.type || 'node'}_${element.id}`;
+        if (!uniqueElements.has(key)) {
+            uniqueElements.set(key, element);
+        }
+    }
+
+    const places = [];
+    for (const [, element] of uniqueElements.entries()) {
+        const place = normalizeOverpassElement(element);
+        if (place) {
+            places.push(place);
+        }
+    }
+
+    for (const place of places.slice(0, 160)) {
+        const marker = L.marker([place.lat, place.lon], {
+            icon: createPoiIcon(place)
+        }).addTo(poiLayer);
+
+        marker.bindTooltip(place.displayName, {
+            direction: 'top',
+            offset: [0, -12],
+            opacity: 0.95,
+            className: 'poi-tooltip'
+        });
+
+        marker.bindPopup(buildPoiPopupContent(place), {
+            className: 'poi-popup',
+            autoPan: true,
+            maxWidth: 280,
+            minWidth: 200
+        });
+
+        marker.on('click', () => {
+            const locationId = `poi_${place.sourceType}_${place.id}`;
+            if (locationNameInput) {
+                locationNameInput.value = place.displayName;
+            }
+            selectLocation(place.lat, place.lon, place.displayName, locationId, { placeInfo: place });
+            marker.openPopup();
+        });
+    }
+
+    updateState();
+}
+
+function normalizeOverpassElement(element) {
+    if (!element) {
+        return null;
+    }
+
+    const tags = element.tags || {};
+    const lat = Number.isFinite(element.lat) ? element.lat : element.center?.lat;
+    const lon = Number.isFinite(element.lon) ? element.lon : element.center?.lon;
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return null;
+    }
+
+    const rawName = typeof tags.name === 'string' ? tags.name.trim() : '';
+    const displayName = rawName || buildFallbackPoiName(tags);
+    const category = resolvePoiCategory(tags);
+    const addressLines = buildPoiAddressLines(tags);
+    const infoLines = buildPoiInfoLines(tags);
+    const websiteRaw = extractFirstTagValue(tags, ['website', 'contact:website', 'url']);
+    const website = sanitizeUrl(websiteRaw);
+
+    return {
+        id: element.id,
+        sourceType: element.type || 'node',
+        lat,
+        lon,
+        name: rawName,
+        displayName,
+        tags,
+        category,
+        addressLines,
+        infoLines,
+        website,
+        websiteLabel: websiteRaw || website,
+        phone: extractFirstTagValue(tags, ['phone', 'contact:phone']),
+        openingHours: typeof tags.opening_hours === 'string' ? tags.opening_hours : ''
+    };
+}
+
+function buildFallbackPoiName(tags) {
+    const category = resolvePoiCategory(tags);
+    if (category && category.label) {
+        return `${category.label} בקרבת מקום`;
+    }
+    return 'נקודת עניין בסביבה';
+}
+
+function resolvePoiCategory(tags = {}) {
+    const amenity = typeof tags.amenity === 'string' ? tags.amenity : '';
+    const shop = typeof tags.shop === 'string' ? tags.shop : '';
+    const tourism = typeof tags.tourism === 'string' ? tags.tourism : '';
+
+    const amenityCategory = AMENITY_CATEGORY_MAP[amenity];
+    if (amenityCategory) {
+        return amenityCategory;
+    }
+
+    const shopCategory = SHOP_CATEGORY_MAP[shop];
+    if (shopCategory) {
+        return shopCategory;
+    }
+
+    const tourismCategory = TOURISM_CATEGORY_MAP[tourism];
+    if (tourismCategory) {
+        return tourismCategory;
+    }
+
+    if (amenity) {
+        return createDynamicCategory(amenity, 'services', '📍');
+    }
+
+    if (shop) {
+        return createDynamicCategory(shop, 'shopping', '🛍️');
+    }
+
+    if (tourism) {
+        return createDynamicCategory(tourism, 'culture', '🎭');
+    }
+
+    return DEFAULT_POI_CATEGORY;
+}
+
+function createDynamicCategory(key, group, emoji) {
+    return {
+        key,
+        label: humanizePoiLabel(key),
+        group,
+        emoji
+    };
+}
+
+const AMENITY_CATEGORY_MAP = Object.freeze({
+    restaurant: { key: 'restaurant', label: 'מסעדה', group: 'food', emoji: '🍽️' },
+    cafe: { key: 'cafe', label: 'בית קפה', group: 'food', emoji: '☕' },
+    bar: { key: 'bar', label: 'בר', group: 'food', emoji: '🍸' },
+    fast_food: { key: 'fast_food', label: 'מזון מהיר', group: 'food', emoji: '🍔' },
+    pub: { key: 'pub', label: 'פאב', group: 'food', emoji: '🍻' },
+    food_court: { key: 'food_court', label: 'פודקורט', group: 'food', emoji: '🍽️' },
+    ice_cream: { key: 'ice_cream', label: 'גלידריה', group: 'food', emoji: '🍨' },
+    bakery: { key: 'bakery', label: 'מאפייה', group: 'food', emoji: '🥐' },
+    cinema: { key: 'cinema', label: 'קולנוע', group: 'culture', emoji: '🎬' },
+    theatre: { key: 'theatre', label: 'תיאטרון', group: 'culture', emoji: '🎭' },
+    arts_centre: { key: 'arts_centre', label: 'מרכז תרבות', group: 'culture', emoji: '🎨' },
+    nightclub: { key: 'nightclub', label: 'מועדון לילה', group: 'culture', emoji: '🎶' }
+});
+
+const SHOP_CATEGORY_MAP = Object.freeze({
+    supermarket: { key: 'supermarket', label: 'סופרמרקט', group: 'shopping', emoji: '🛒' },
+    convenience: { key: 'convenience', label: 'מכולת', group: 'shopping', emoji: '🛍️' },
+    mall: { key: 'mall', label: 'קניון', group: 'shopping', emoji: '🏬' },
+    department_store: { key: 'department_store', label: 'כלבו', group: 'shopping', emoji: '🏢' },
+    clothes: { key: 'clothes', label: 'חנות בגדים', group: 'shopping', emoji: '👕' },
+    shoes: { key: 'shoes', label: 'חנות נעליים', group: 'shopping', emoji: '👟' },
+    electronics: { key: 'electronics', label: 'אלקטרוניקה', group: 'shopping', emoji: '🔌' },
+    books: { key: 'books', label: 'חנות ספרים', group: 'shopping', emoji: '📚' },
+    gift: { key: 'gift', label: 'מתנות', group: 'shopping', emoji: '🎁' },
+    beauty: { key: 'beauty', label: 'קוסמטיקה', group: 'shopping', emoji: '💄' }
+});
+
+const TOURISM_CATEGORY_MAP = Object.freeze({
+    museum: { key: 'museum', label: 'מוזיאון', group: 'culture', emoji: '🏛️' },
+    gallery: { key: 'gallery', label: 'גלריה', group: 'culture', emoji: '🖼️' },
+    attraction: { key: 'attraction', label: 'אטרקציה', group: 'culture', emoji: '⭐' }
+});
+
+const DEFAULT_POI_CATEGORY = Object.freeze({
+    key: 'poi',
+    label: 'נקודת עניין',
+    group: 'services',
+    emoji: '📍'
+});
+
+function humanizePoiLabel(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    return value
+        .split(/[_-]/)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ')
+        .trim();
+}
+
+function buildPoiAddressLines(tags = {}) {
+    const street = extractFirstTagValue(tags, ['addr:street', 'addr:road']);
+    const houseNumber = extractFirstTagValue(tags, ['addr:housenumber']);
+    const city = extractFirstTagValue(tags, ['addr:city', 'addr:town', 'addr:place', 'addr:suburb']);
+    const postcode = extractFirstTagValue(tags, ['addr:postcode']);
+
+    const lines = [];
+    if (street) {
+        const streetLine = [street, houseNumber].filter(Boolean).join(' ');
+        if (streetLine) {
+            lines.push(streetLine);
+        }
+    }
+
+    if (city) {
+        lines.push(city);
+    }
+
+    if (postcode) {
+        lines.push(`מיקוד ${postcode}`);
+    }
+
+    return lines;
+}
+
+function buildPoiInfoLines(tags = {}) {
+    const lines = [];
+
+    const cuisine = extractFirstTagValue(tags, ['cuisine']);
+    if (cuisine) {
+        lines.push({ label: 'מטבח', value: humanizePoiLabel(cuisine) });
+    }
+
+    const openingHours = typeof tags.opening_hours === 'string' ? tags.opening_hours : '';
+    if (openingHours) {
+        lines.push({ label: 'שעות פתיחה', value: openingHours });
+    }
+
+    const phone = extractFirstTagValue(tags, ['phone', 'contact:phone']);
+    if (phone) {
+        lines.push({ label: 'טלפון', value: phone });
+    }
+
+    return lines;
+}
+
+function extractFirstTagValue(tags, keys) {
+    if (!tags || !Array.isArray(keys)) {
+        return '';
+    }
+
+    for (const key of keys) {
+        const value = tags[key];
+        if (typeof value === 'string' && value.trim()) {
+            return value.trim();
+        }
+    }
+
+    return '';
+}
+
+function sanitizeUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return '';
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+
+    if (/^\/\//.test(trimmed)) {
+        return `https:${trimmed}`;
+    }
+
+    if (/^[\w.-]+\.[\w.-]+(?:\/[\w./%-]*)?$/i.test(trimmed)) {
+        return `https://${trimmed}`;
+    }
+
+    return '';
+}
+
+function createPoiIcon(place) {
+    const groupClass = place?.category?.group ? `poi-marker--${place.category.group}` : 'poi-marker--services';
+    const emoji = place?.category?.emoji || '📍';
+
+    return L.divIcon({
+        className: 'poi-marker-wrapper',
+        html: `<div class="poi-marker ${groupClass}"><span class="poi-marker__emoji">${escapeHtml(emoji)}</span></div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -16],
+        tooltipAnchor: [0, -18]
+    });
+}
+
+function buildPoiPopupContent(place) {
+    const details = [];
+    if (place?.category?.label) {
+        details.push(`<li><span class="font-medium text-gray-700">סוג:</span> ${escapeHtml(place.category.label)}</li>`);
+    }
+
+    if (Array.isArray(place?.addressLines) && place.addressLines.length > 0) {
+        details.push(`<li><span class="font-medium text-gray-700">כתובת:</span> ${escapeHtml(place.addressLines.join(', '))}</li>`);
+    }
+
+    if (Array.isArray(place?.infoLines)) {
+        for (const line of place.infoLines) {
+            if (line?.label && line?.value) {
+                details.push(`<li><span class="font-medium text-gray-700">${escapeHtml(line.label)}:</span> ${escapeHtml(line.value)}</li>`);
+            }
+        }
+    }
+
+    if (place?.openingHours && !place.infoLines.some((line) => line.label === 'שעות פתיחה')) {
+        details.push(`<li><span class="font-medium text-gray-700">שעות פתיחה:</span> ${escapeHtml(place.openingHours)}</li>`);
+    }
+
+    if (place?.phone) {
+        details.push(`<li><span class="font-medium text-gray-700">טלפון:</span> ${escapeHtml(place.phone)}</li>`);
+    }
+
+    if (place?.website || place?.websiteLabel) {
+        const websiteHref = place?.website ? escapeHtml(place.website) : '';
+        const rawLabel = typeof place?.websiteLabel === 'string' && place.websiteLabel.trim()
+            ? place.websiteLabel.trim()
+            : place?.website || '';
+        const websiteLabel = rawLabel.replace(/^https?:\/\//, '');
+        if (websiteHref) {
+            details.push(`<li><span class="font-medium text-gray-700">אתר:</span> <a href="${websiteHref}" target="_blank" rel="noopener" class="text-blue-600 underline">${escapeHtml(websiteLabel)}</a></li>`);
+        } else if (websiteLabel) {
+            details.push(`<li><span class="font-medium text-gray-700">אתר:</span> ${escapeHtml(websiteLabel)}</li>`);
+        }
+    }
+
+    const detailsHtml = details.length > 0
+        ? `<ul class="poi-popup__list">${details.join('')}</ul>`
+        : `<p class="text-sm text-gray-500">מידע נוסף לא זמין למקום זה.</p>`;
+
+    return `
+        <div class="poi-popup__content">
+            <div class="poi-popup__header">
+                <span class="poi-popup__emoji" aria-hidden="true">${escapeHtml(place?.category?.emoji || '📍')}</span>
+                <div>
+                    <h3 class="poi-popup__title">${escapeHtml(place.displayName)}</h3>
+                    <p class="poi-popup__subtitle">מידע מאתר OpenStreetMap</p>
+                </div>
+            </div>
+            ${detailsHtml}
+            <p class="poi-popup__hint">לחיצה על הסמן בחרה את המקום לצ'ק-אין.</p>
+        </div>
+    `;
 }
 
 async function handleSearchLocation() {
@@ -447,12 +969,30 @@ async function handleSearchLocation() {
     updateState();
 }
 
-function selectLocation(lat, lon, name, id = null) {
+function selectLocation(lat, lon, name, id = null, options = {}) {
     if (map) {
         map.closePopup();
     }
     targetCoords = { lat, lon };
     targetName = name;
+
+    const placeInfo = options?.placeInfo;
+    if (placeInfo && typeof placeInfo === 'object') {
+        selectedPlaceInfo = {
+            id: `poi_${placeInfo.sourceType || 'node'}_${placeInfo.id ?? ''}`,
+            displayName: placeInfo.displayName || name,
+            category: placeInfo.category || null,
+            addressLines: Array.isArray(placeInfo.addressLines) ? [...placeInfo.addressLines] : [],
+            infoLines: Array.isArray(placeInfo.infoLines) ? [...placeInfo.infoLines] : [],
+            website: typeof placeInfo.website === 'string' ? placeInfo.website : '',
+            websiteLabel: typeof placeInfo.websiteLabel === 'string' ? placeInfo.websiteLabel : '',
+            phone: typeof placeInfo.phone === 'string' ? placeInfo.phone : '',
+            openingHours: typeof placeInfo.openingHours === 'string' ? placeInfo.openingHours : '',
+            tags: placeInfo.tags || null
+        };
+    } else {
+        selectedPlaceInfo = null;
+    }
 
     // Generate a unique ID if one isn't provided
     currentLocationId = id || `loc_${lat.toFixed(6)}_${lon.toFixed(6)}`;
@@ -488,6 +1028,73 @@ function hideLocationCard() {
     targetDetailsCard.innerHTML = '';
 }
 
+function renderSelectedPlaceInfoSection(placeInfo) {
+    if (!placeInfo) {
+        return '';
+    }
+
+    const emoji = placeInfo?.category?.emoji || '📍';
+    const categoryLabel = placeInfo?.category?.label || 'נקודת עניין בסביבה';
+    const addressHtml = Array.isArray(placeInfo.addressLines) && placeInfo.addressLines.length > 0
+        ? `<div class="mt-3">
+                <h4 class="text-xs font-semibold text-blue-900 uppercase tracking-wide mb-1">כתובת</h4>
+                <p class="text-sm text-blue-900/90 leading-snug">${escapeHtml(placeInfo.addressLines.join(', '))}</p>
+            </div>`
+        : '';
+
+    const detailItems = [];
+    if (Array.isArray(placeInfo.infoLines)) {
+        for (const info of placeInfo.infoLines) {
+            if (info?.label && info?.value) {
+                detailItems.push(`<li><span class="font-semibold">${escapeHtml(info.label)}:</span> ${escapeHtml(info.value)}</li>`);
+            }
+        }
+    }
+
+    const openingHours = placeInfo.openingHours && !detailItems.some((item) => item.includes('שעות פתיחה'))
+        ? `<li><span class="font-semibold">שעות פתיחה:</span> ${escapeHtml(placeInfo.openingHours)}</li>`
+        : '';
+
+    if (openingHours) {
+        detailItems.push(openingHours);
+    }
+
+    if (placeInfo.phone) {
+        detailItems.push(`<li><span class="font-semibold">טלפון:</span> ${escapeHtml(placeInfo.phone)}</li>`);
+    }
+
+    const detailsHtml = detailItems.length > 0
+        ? `<ul class="mt-3 space-y-1 text-sm text-blue-900/90">${detailItems.join('')}</ul>`
+        : '';
+
+    let websiteHtml = '';
+    const rawWebsiteLabel = typeof placeInfo.websiteLabel === 'string' && placeInfo.websiteLabel.trim()
+        ? placeInfo.websiteLabel.trim()
+        : placeInfo.website || '';
+    const displayWebsite = rawWebsiteLabel.replace(/^https?:\/\//, '');
+    if (placeInfo.website) {
+        websiteHtml = `<div class="mt-3 text-sm"><span class="font-semibold text-blue-900">אתר:</span> <a href="${escapeHtml(placeInfo.website)}" target="_blank" rel="noopener" class="text-blue-700 underline">${escapeHtml(displayWebsite)}</a></div>`;
+    } else if (displayWebsite) {
+        websiteHtml = `<div class="mt-3 text-sm"><span class="font-semibold text-blue-900">אתר:</span> ${escapeHtml(displayWebsite)}</div>`;
+    }
+
+    return `
+        <div class="selected-place-info bg-blue-50 border border-blue-100 rounded-lg p-4 mb-4">
+            <div class="flex items-center gap-3">
+                <div class="selected-place-info__icon" aria-hidden="true">${escapeHtml(emoji)}</div>
+                <div>
+                    <p class="text-sm font-semibold text-blue-900">${escapeHtml(categoryLabel)}</p>
+                    <p class="text-xs text-blue-800/70">מידע מתוך קהילת OpenStreetMap</p>
+                </div>
+            </div>
+            ${addressHtml}
+            ${detailsHtml}
+            ${websiteHtml}
+            <p class="mt-3 text-[0.7rem] text-blue-800/60">לחצו על "התחל צ'ק-אין" כדי לשתף את זמן ההמתנה שלכם במקום זה.</p>
+        </div>
+    `;
+}
+
 function showLocationCard(name, id) {
     if (!targetDetailsCard) return;
     const locationData = getLocationFromCache(id) || { id, name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords), intel: null };
@@ -516,6 +1123,7 @@ function showLocationCard(name, id) {
         summaryClass: 'text-sm text-blue-900/90 leading-relaxed',
         maxLength: 220
     });
+    const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
 
     targetDetailsCard.innerHTML = `
         <div class="flex items-start justify-between gap-3 mb-2">
@@ -524,6 +1132,7 @@ function showLocationCard(name, id) {
                 ×
             </button>
         </div>
+        ${placeInfoHtml}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
             <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
                 <div class="font-semibold text-gray-700">זמן המתנה ממוצע</div>
