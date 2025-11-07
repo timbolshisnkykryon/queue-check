@@ -302,6 +302,54 @@
             font-size: 1.35rem;
         }
 
+        .search-suggestions {
+            position: absolute;
+            top: calc(100% + 0.5rem);
+            right: 0;
+            left: 0;
+            z-index: 50;
+            background: #ffffff;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+            padding: 0.5rem 0;
+            margin: 0;
+            list-style: none;
+            max-height: 18rem;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+
+        .search-suggestions.hidden {
+            display: none;
+        }
+
+        .search-suggestion-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+            padding: 0.55rem 0.85rem;
+            cursor: pointer;
+            transition: background 0.15s ease-in-out;
+        }
+
+        .search-suggestion-item:hover,
+        .search-suggestion-item--active {
+            background: rgba(37, 99, 235, 0.08);
+        }
+
+        .search-suggestion-item__title {
+            font-weight: 600;
+            color: #1f2937;
+            font-size: 0.9rem;
+        }
+
+        .search-suggestion-item__subtitle {
+            font-size: 0.75rem;
+            color: #4b5563;
+            line-height: 1.25;
+        }
+
         /* Loading Spinner */
         .spinner {
             border-top-color: #3498db;
@@ -698,14 +746,17 @@
                 <div id="map" class="h-full w-full" style="z-index: 10;"></div>
 
                 <!-- Search Bar -->
-                <div id="map-search-bar" class="absolute top-4 left-4 right-4 z-20 bg-white p-2 rounded-lg shadow-lg flex gap-2">
-                    <input type="text" id="location-name-input" class="flex-1 w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="חפש שם מקום...">
-                    <button id="search-btn" class="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 transition">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                          <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
-                        </svg>
-                    </button>
-                </div>
+                  <div id="map-search-bar" class="absolute top-4 left-4 right-4 z-20 bg-white p-2 rounded-lg shadow-lg flex gap-2">
+                      <div class="relative flex-1">
+                          <input type="text" id="location-name-input" class="flex-1 w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="חפש שם מקום..." autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="search-suggestions" aria-expanded="false">
+                          <ul id="search-suggestions" class="search-suggestions hidden" role="listbox" aria-label="תוצאות חיפוש"></ul>
+                      </div>
+                      <button id="search-btn" type="button" class="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 transition">
+                          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+                          </svg>
+                      </button>
+                  </div>
 
                 <!-- NEW: GPS Status Button -->
                 <div class="absolute left-4 z-20 bottom-safe">
