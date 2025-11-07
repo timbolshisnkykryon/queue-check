@@ -169,6 +169,139 @@
             display: none;
         }
 
+        .poi-marker-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .poi-marker {
+            width: 30px;
+            height: 30px;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-size: 18px;
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.25);
+            border: 2px solid rgba(255, 255, 255, 0.9);
+        }
+
+        .poi-marker--food {
+            background: linear-gradient(135deg, #16a34a, #22c55e);
+        }
+
+        .poi-marker--shopping {
+            background: linear-gradient(135deg, #f97316, #fb923c);
+        }
+
+        .poi-marker--culture {
+            background: linear-gradient(135deg, #8b5cf6, #6366f1);
+        }
+
+        .poi-marker--services {
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+        }
+
+        .poi-marker__emoji {
+            font-size: 1.1rem;
+            line-height: 1;
+        }
+
+        .poi-tooltip {
+            background: rgba(15, 23, 42, 0.92);
+            color: #f8fafc;
+            border: none;
+            border-radius: 9999px;
+            padding: 0.35rem 0.65rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            box-shadow: 0 8px 16px rgba(15, 23, 42, 0.35);
+        }
+
+        .poi-tooltip:before {
+            display: none;
+        }
+
+        .poi-popup .leaflet-popup-content-wrapper {
+            border-radius: 1rem;
+            padding: 0;
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.35);
+        }
+
+        .poi-popup .leaflet-popup-content {
+            margin: 0;
+        }
+
+        .poi-popup__content {
+            direction: rtl;
+            text-align: right;
+            padding: 1rem 1.1rem;
+            max-width: 18rem;
+        }
+
+        .poi-popup__header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .poi-popup__emoji {
+            font-size: 1.65rem;
+        }
+
+        .poi-popup__title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin: 0;
+        }
+
+        .poi-popup__subtitle {
+            font-size: 0.72rem;
+            color: #1e3a8a;
+            margin: 0.1rem 0 0;
+        }
+
+        .poi-popup__list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 0.75rem 0;
+            display: grid;
+            gap: 0.4rem;
+        }
+
+        .poi-popup__list li {
+            font-size: 0.8rem;
+            color: #1e293b;
+        }
+
+        .poi-popup__hint {
+            font-size: 0.72rem;
+            color: #1e3a8a;
+            background: rgba(37, 99, 235, 0.1);
+            border-radius: 0.75rem;
+            padding: 0.4rem 0.65rem;
+            margin: 0;
+        }
+
+        .selected-place-info {
+            backdrop-filter: blur(2px);
+        }
+
+        .selected-place-info__icon {
+            width: 2.25rem;
+            height: 2.25rem;
+            border-radius: 9999px;
+            background: rgba(59, 130, 246, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.35rem;
+        }
+
         /* Loading Spinner */
         .spinner {
             border-top-color: #3498db;
