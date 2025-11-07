@@ -36,6 +36,11 @@ export function initializeApplication(context) {
         targetCircle,
         targetCoords,
         targetName,
+        searchSuggestions,
+        activeSuggestionIndex,
+        searchSuggestionsQuery,
+        searchFetchTimeoutId,
+        searchSuggestionController,
         currentLocationId,
         gpsWatcherId,
         checkInStartTime,
@@ -80,6 +85,7 @@ export function initializeApplication(context) {
         mapContainer,
         searchBtn,
         locationNameInput,
+        searchSuggestionsList,
         gpsStatusBtn,
         allLocationsList,
         waitingLocationName,
@@ -131,6 +137,8 @@ export function initializeApplication(context) {
         right: 16
     });
 
+    const ALLOWED_POI_AMENITIES = new Set(['restaurant', 'cafe', 'bar']);
+
     function updateState() {
         Object.assign(state, {
             map,
@@ -139,6 +147,11 @@ export function initializeApplication(context) {
             targetCircle,
             targetCoords,
             targetName,
+            searchSuggestions,
+            activeSuggestionIndex,
+            searchSuggestionsQuery,
+            searchFetchTimeoutId,
+            searchSuggestionController,
             currentLocationId,
             gpsWatcherId,
             checkInStartTime,
@@ -169,6 +182,525 @@ export function initializeApplication(context) {
             locationsLoaded,
             firebaseInitializationError
         });
+    }
+
+    const NOMINATIM_SEARCH_ENDPOINT = 'https://nominatim.openstreetmap.org/search';
+    const SEARCH_SUGGESTION_LIMIT = 6;
+    const SEARCH_SUGGESTION_DEBOUNCE_MS = 320;
+    const MIN_SEARCH_QUERY_LENGTH = 2;
+    const SUGGESTION_ID_PREFIX = 'search-suggestion-option';
+    const DEFAULT_SUGGESTION_EMOJI = '📍';
+
+    function abortPendingSearchSuggestions() {
+        if (searchFetchTimeoutId) {
+            clearTimeout(searchFetchTimeoutId);
+            searchFetchTimeoutId = null;
+        }
+
+        if (searchSuggestionController) {
+            try {
+                searchSuggestionController.abort();
+            } catch (abortError) {
+                console.warn('Failed to abort search suggestion request:', abortError);
+            }
+            searchSuggestionController = null;
+        }
+
+        updateState();
+    }
+
+    function clearSearchSuggestions({ abort = false, resetQuery = false } = {}) {
+        if (abort) {
+            abortPendingSearchSuggestions();
+        }
+
+        searchSuggestions = [];
+        activeSuggestionIndex = -1;
+
+        if (resetQuery) {
+            searchSuggestionsQuery = '';
+        }
+
+        if (searchSuggestionsList) {
+            searchSuggestionsList.innerHTML = '';
+            searchSuggestionsList.classList.add('hidden');
+            searchSuggestionsList.setAttribute('aria-hidden', 'true');
+        }
+
+        if (locationNameInput) {
+            locationNameInput.setAttribute('aria-expanded', 'false');
+            locationNameInput.removeAttribute('aria-activedescendant');
+        }
+
+        updateState();
+    }
+
+    function normalizeNominatimLabel(value) {
+        if (!value || typeof value !== 'string') {
+            return '';
+        }
+
+        const cleaned = value.replace(/_/g, ' ').trim();
+        if (!cleaned) {
+            return '';
+        }
+
+        return cleaned
+            .split(' ')
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(' ');
+    }
+
+    function getLocalizedPrimaryName(result) {
+        if (!result || typeof result !== 'object') {
+            return '';
+        }
+
+        const namedetails = result.namedetails;
+        if (namedetails && typeof namedetails === 'object') {
+            const candidates = ['name:he', 'name:he-IL', 'name'];
+            for (const key of candidates) {
+                const value = namedetails[key];
+                if (typeof value === 'string' && value.trim()) {
+                    return value.trim();
+                }
+            }
+        }
+
+        const displayName = typeof result.display_name === 'string' ? result.display_name : '';
+        if (!displayName) {
+            return '';
+        }
+
+        const [firstPart] = displayName.split(',').map((part) => part.trim()).filter(Boolean);
+        return firstPart || displayName.trim();
+    }
+
+    function pushUnique(list, value) {
+        if (!value || typeof value !== 'string') {
+            return;
+        }
+
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return;
+        }
+
+        if (!list.includes(trimmed)) {
+            list.push(trimmed);
+        }
+    }
+
+    function buildAddressLinesFromResult(result) {
+        const address = result?.address;
+        if (!address || typeof address !== 'object') {
+            const fallback = typeof result?.display_name === 'string'
+                ? result.display_name.split(',').map((part) => part.trim()).filter(Boolean).slice(1, 4)
+                : [];
+            return fallback;
+        }
+
+        const lines = [];
+        const streetParts = [];
+        if (address.house_number) {
+            streetParts.push(address.house_number);
+        }
+        if (address.road) {
+            streetParts.push(address.road);
+        }
+        if (streetParts.length > 0) {
+            pushUnique(lines, streetParts.join(' '));
+        }
+
+        const localityKeys = [
+            'neighbourhood',
+            'quarter',
+            'suburb',
+            'village',
+            'town',
+            'city',
+            'municipality',
+            'county'
+        ];
+        for (const key of localityKeys) {
+            if (address[key]) {
+                pushUnique(lines, address[key]);
+                break;
+            }
+        }
+
+        const regionKeys = ['state_district', 'state', 'region', 'province', 'district'];
+        for (const key of regionKeys) {
+            if (address[key]) {
+                pushUnique(lines, address[key]);
+                break;
+            }
+        }
+
+        if (address.postcode) {
+            pushUnique(lines, address.postcode);
+        }
+
+        if (address.country) {
+            pushUnique(lines, address.country);
+        }
+
+        if (lines.length === 0 && typeof result?.display_name === 'string') {
+            return result.display_name.split(',').map((part) => part.trim()).filter(Boolean).slice(1, 4);
+        }
+
+        return lines;
+    }
+
+    function createSuggestionFromResult(result) {
+        if (!result || typeof result !== 'object') {
+            return null;
+        }
+
+        const lat = Number.parseFloat(result.lat);
+        const lon = Number.parseFloat(result.lon);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            return null;
+        }
+
+        const rawDisplayName = typeof result.display_name === 'string' ? result.display_name.trim() : '';
+        const primaryName = getLocalizedPrimaryName(result) || '';
+        const fallbackParts = rawDisplayName ? rawDisplayName.split(',').map((part) => part.trim()).filter(Boolean) : [];
+        const fallbackMain = fallbackParts[0] || '';
+        const addressLines = buildAddressLinesFromResult(result).filter(Boolean);
+        let secondaryText = addressLines.slice(0, 3).join(' • ');
+
+        if (!secondaryText && fallbackParts.length > 1) {
+            secondaryText = fallbackParts.slice(1).join(', ');
+        }
+
+        const mainText = primaryName || fallbackMain || rawDisplayName;
+        if (!mainText) {
+            return null;
+        }
+
+        const displayName = secondaryText ? `${mainText}, ${secondaryText}` : mainText;
+
+        const rawCategory = normalizeNominatimLabel(result.addresstype)
+            || normalizeNominatimLabel(result.type)
+            || normalizeNominatimLabel(result.category);
+
+        const extratags = result.extratags && typeof result.extratags === 'object' ? result.extratags : null;
+        const contactPhone = extratags?.['contact:phone'] || extratags?.phone || '';
+        const contactWebsite = extratags?.website || extratags?.['contact:website'] || '';
+        const contactOpeningHours = extratags?.opening_hours || '';
+
+        const suggestionId = result.place_id ? `nominatim_${result.place_id}` : `${lat.toFixed(6)}_${lon.toFixed(6)}`;
+
+        return {
+            id: suggestionId,
+            displayName,
+            mainText,
+            secondaryText,
+            lat,
+            lon,
+            placeInfo: {
+                sourceType: 'nominatim',
+                id: suggestionId,
+                displayName: mainText,
+                category: {
+                    label: rawCategory || 'נקודת עניין בסביבה',
+                    emoji: DEFAULT_SUGGESTION_EMOJI
+                },
+                addressLines,
+                infoLines: [],
+                website: contactWebsite || '',
+                websiteLabel: contactWebsite || '',
+                phone: contactPhone || '',
+                openingHours: contactOpeningHours || '',
+                tags: {
+                    osmType: result.osm_type || null,
+                    osmId: result.osm_id || null,
+                    category: result.category || null,
+                    type: result.type || null
+                }
+            }
+        };
+    }
+
+    function renderSearchSuggestions() {
+        if (!searchSuggestionsList) {
+            return;
+        }
+
+        if (!Array.isArray(searchSuggestions) || searchSuggestions.length === 0) {
+            searchSuggestionsList.innerHTML = '';
+            searchSuggestionsList.classList.add('hidden');
+            searchSuggestionsList.setAttribute('aria-hidden', 'true');
+            if (locationNameInput) {
+                locationNameInput.setAttribute('aria-expanded', 'false');
+                locationNameInput.removeAttribute('aria-activedescendant');
+            }
+            return;
+        }
+
+        const itemsHtml = searchSuggestions
+            .map((suggestion, index) => {
+                const isActive = index === activeSuggestionIndex;
+                const optionId = `${SUGGESTION_ID_PREFIX}-${index}`;
+                const subtitle = suggestion.secondaryText
+                    ? `<span class="search-suggestion-item__subtitle">${escapeHtml(suggestion.secondaryText)}</span>`
+                    : '';
+
+                return `
+                    <li id="${optionId}" class="search-suggestion-item${isActive ? ' search-suggestion-item--active' : ''}" role="option" aria-selected="${isActive}" data-index="${index}">
+                        <span class="search-suggestion-item__title">${escapeHtml(suggestion.mainText)}</span>
+                        ${subtitle}
+                    </li>
+                `;
+            })
+            .join('');
+
+        searchSuggestionsList.innerHTML = itemsHtml;
+        searchSuggestionsList.classList.remove('hidden');
+        searchSuggestionsList.setAttribute('aria-hidden', 'false');
+
+        if (locationNameInput) {
+            locationNameInput.setAttribute('aria-expanded', 'true');
+            if (activeSuggestionIndex >= 0) {
+                locationNameInput.setAttribute('aria-activedescendant', `${SUGGESTION_ID_PREFIX}-${activeSuggestionIndex}`);
+            } else {
+                locationNameInput.removeAttribute('aria-activedescendant');
+            }
+        }
+
+        if (activeSuggestionIndex >= 0) {
+            const activeEl = searchSuggestionsList.querySelector(`[data-index="${activeSuggestionIndex}"]`);
+            if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+                activeEl.scrollIntoView({ block: 'nearest' });
+            }
+        }
+    }
+
+    function setActiveSuggestion(index) {
+        if (!Array.isArray(searchSuggestions) || searchSuggestions.length === 0) {
+            return;
+        }
+
+        const boundedIndex = Math.max(-1, Math.min(index, searchSuggestions.length - 1));
+        if (boundedIndex === activeSuggestionIndex) {
+            return;
+        }
+
+        activeSuggestionIndex = boundedIndex;
+        renderSearchSuggestions();
+        updateState();
+    }
+
+    function moveActiveSuggestion(step) {
+        if (!Array.isArray(searchSuggestions) || searchSuggestions.length === 0) {
+            return;
+        }
+
+        const total = searchSuggestions.length;
+        if (total === 0) {
+            return;
+        }
+
+        if (activeSuggestionIndex === -1) {
+            setActiveSuggestion(step > 0 ? 0 : total - 1);
+            return;
+        }
+
+        const nextIndex = (activeSuggestionIndex + step + total) % total;
+        setActiveSuggestion(nextIndex);
+    }
+
+    function selectSearchSuggestion(index, { focusInput = true } = {}) {
+        if (!Array.isArray(searchSuggestions) || searchSuggestions.length === 0) {
+            return;
+        }
+
+        const suggestion = searchSuggestions[index];
+        if (!suggestion) {
+            return;
+        }
+
+        clearSearchSuggestions({ abort: true, resetQuery: true });
+
+        if (locationNameInput) {
+            locationNameInput.value = suggestion.displayName;
+            if (focusInput) {
+                locationNameInput.focus();
+            }
+        }
+
+        targetName = suggestion.displayName;
+        selectLocation(suggestion.lat, suggestion.lon, suggestion.displayName, null, { placeInfo: suggestion.placeInfo });
+        renderVisitedLocationsOnMap();
+        updateState();
+    }
+
+    function scheduleSearchSuggestions(query) {
+        const trimmed = typeof query === 'string' ? query.trim() : '';
+
+        if (trimmed.length < MIN_SEARCH_QUERY_LENGTH) {
+            clearSearchSuggestions({ abort: true, resetQuery: trimmed.length === 0 });
+            return;
+        }
+
+        if (trimmed === searchSuggestionsQuery && Array.isArray(searchSuggestions) && searchSuggestions.length > 0) {
+            renderSearchSuggestions();
+            return;
+        }
+
+        if (searchFetchTimeoutId) {
+            clearTimeout(searchFetchTimeoutId);
+        }
+
+        searchFetchTimeoutId = setTimeout(() => {
+            searchFetchTimeoutId = null;
+            void loadSearchSuggestions(trimmed, { triggeredByInput: true, autopickSingleResult: false });
+            updateState();
+        }, SEARCH_SUGGESTION_DEBOUNCE_MS);
+
+        updateState();
+    }
+
+    function handleLocationInputChange(event) {
+        scheduleSearchSuggestions(event.target.value || '');
+    }
+
+    function handleLocationInputKeyDown(event) {
+        if (!Array.isArray(searchSuggestions) || searchSuggestions.length === 0) {
+            if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                event.preventDefault();
+                void handleSearchLocation();
+            }
+            return;
+        }
+
+        switch (event.key) {
+            case 'ArrowDown':
+                event.preventDefault();
+                moveActiveSuggestion(1);
+                break;
+            case 'ArrowUp':
+                event.preventDefault();
+                moveActiveSuggestion(-1);
+                break;
+            case 'Enter':
+                event.preventDefault();
+                if (activeSuggestionIndex >= 0) {
+                    selectSearchSuggestion(activeSuggestionIndex);
+                } else {
+                    selectSearchSuggestion(0);
+                }
+                break;
+            case 'Escape':
+                event.preventDefault();
+                clearSearchSuggestions({ abort: true, resetQuery: false });
+                break;
+            default:
+                break;
+        }
+    }
+
+    function handleSearchSuggestionListClick(event) {
+        const optionEl = event.target.closest('[data-index]');
+        if (!optionEl) {
+            return;
+        }
+
+        const index = Number.parseInt(optionEl.getAttribute('data-index'), 10);
+        if (Number.isNaN(index)) {
+            return;
+        }
+
+        selectSearchSuggestion(index);
+    }
+
+    async function loadSearchSuggestions(query, { triggeredByInput = false, autopickSingleResult = false } = {}) {
+        const trimmed = typeof query === 'string' ? query.trim() : '';
+
+        if (trimmed.length < MIN_SEARCH_QUERY_LENGTH) {
+            clearSearchSuggestions({ abort: triggeredByInput, resetQuery: trimmed.length === 0 });
+            return { suggestions: [] };
+        }
+
+        abortPendingSearchSuggestions();
+
+        searchSuggestionsQuery = trimmed;
+        searchSuggestionController = new AbortController();
+        updateState();
+
+        try {
+            const url = new URL(NOMINATIM_SEARCH_ENDPOINT);
+            url.searchParams.set('format', 'json');
+            url.searchParams.set('q', trimmed);
+            url.searchParams.set('limit', String(SEARCH_SUGGESTION_LIMIT));
+            url.searchParams.set('addressdetails', '1');
+            url.searchParams.set('extratags', '1');
+            url.searchParams.set('namedetails', '1');
+            url.searchParams.set('accept-language', 'he,en');
+
+            const response = await fetch(url.toString(), {
+                signal: searchSuggestionController.signal,
+                headers: {
+                    'Accept-Language': 'he,en;q=0.8'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Nominatim search failed with status ${response.status}`);
+            }
+
+            const payload = await response.json();
+            if (!Array.isArray(payload)) {
+                throw new Error('Unexpected Nominatim search response format.');
+            }
+
+            if (locationNameInput && locationNameInput.value.trim() !== trimmed) {
+                return { suggestions: [] };
+            }
+
+            const suggestions = payload.map(createSuggestionFromResult).filter(Boolean);
+            searchSuggestions = suggestions;
+
+            if (suggestions.length === 0) {
+                activeSuggestionIndex = -1;
+                renderSearchSuggestions();
+                updateState();
+                return { suggestions: [] };
+            }
+
+            if (activeSuggestionIndex >= suggestions.length) {
+                activeSuggestionIndex = -1;
+            }
+
+            if (!triggeredByInput && suggestions.length === 1) {
+                activeSuggestionIndex = 0;
+            }
+
+            renderSearchSuggestions();
+            updateState();
+
+            if (autopickSingleResult && suggestions.length === 1) {
+                selectSearchSuggestion(0, { focusInput: false });
+            }
+
+            return { suggestions };
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                return { suggestions: [] };
+            }
+
+            console.error('Error fetching search suggestions:', error);
+            if (!triggeredByInput) {
+                clearSearchSuggestions({ abort: true, resetQuery: false });
+            }
+            return { suggestions: [], error };
+        } finally {
+            searchSuggestionController = null;
+            updateState();
+        }
     }
 
 
@@ -208,10 +740,15 @@ async function initApp() {
     });
 
     // Event Listeners
-    searchBtn.addEventListener('click', handleSearchLocation);
-    locationNameInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') handleSearchLocation();
-    });
+    searchBtn.addEventListener('click', () => { void handleSearchLocation(); });
+    if (locationNameInput) {
+        locationNameInput.addEventListener('input', handleLocationInputChange);
+        locationNameInput.addEventListener('keydown', handleLocationInputKeyDown);
+    }
+    if (searchSuggestionsList) {
+        searchSuggestionsList.addEventListener('pointerdown', (event) => event.preventDefault());
+        searchSuggestionsList.addEventListener('click', handleSearchSuggestionListClick);
+    }
 
     cancelCheckInBtn.addEventListener('click', () => { void finishCheckIn(false); }); // Don't save
     manualFinishBtn.addEventListener('click', () => { void finishCheckIn(true); }); // Save
@@ -418,6 +955,7 @@ function initMap() {
         const { lat, lng } = e.latlng;
         targetName = `מיקום (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
         locationNameInput.value = targetName;
+        clearSearchSuggestions({ abort: true, resetQuery: false });
         selectLocation(lat, lng, targetName);
     });
 
@@ -557,15 +1095,9 @@ function buildOverpassPlacesQuery({ south, west, north, east }) {
     return `
 [out:json][timeout:25];
 (
-  node["amenity"~"^(restaurant|cafe|bar|fast_food|pub|food_court|ice_cream|bakery|cinema|theatre|arts_centre|nightclub)$"](${bbox});
-  node["shop"~"^(supermarket|convenience|mall|department_store|clothes|shoes|electronics|books|gift|beauty)$"](${bbox});
-  node["tourism"~"^(museum|gallery|attraction)$"](${bbox});
-  way["amenity"~"^(restaurant|cafe|bar|fast_food|pub|food_court|ice_cream|bakery|cinema|theatre|arts_centre|nightclub)$"](${bbox});
-  way["shop"~"^(supermarket|convenience|mall|department_store)$"](${bbox});
-  way["tourism"~"^(museum|gallery|attraction)$"](${bbox});
-  rel["amenity"~"^(restaurant|cafe|bar|fast_food|pub|food_court|ice_cream|bakery|cinema|theatre|arts_centre|nightclub)$"](${bbox});
-  rel["shop"~"^(supermarket|convenience|mall|department_store)$"](${bbox});
-  rel["tourism"~"^(museum|gallery|attraction)$"](${bbox});
+  node["amenity"~"^(restaurant|cafe|bar)$"](${bbox});
+  way["amenity"~"^(restaurant|cafe|bar)$"](${bbox});
+  rel["amenity"~"^(restaurant|cafe|bar)$"](${bbox});
 );
 out center 120;
 `;
@@ -639,6 +1171,12 @@ function normalizeOverpassElement(element) {
     }
 
     const tags = element.tags || {};
+    const amenity = typeof tags.amenity === 'string' ? tags.amenity : '';
+
+    if (!ALLOWED_POI_AMENITIES.has(amenity)) {
+        return null;
+    }
+
     const lat = Number.isFinite(element.lat) ? element.lat : element.center?.lat;
     const lon = Number.isFinite(element.lon) ? element.lon : element.center?.lon;
 
@@ -936,26 +1474,34 @@ function buildPoiPopupContent(place) {
 }
 
 async function handleSearchLocation() {
-    const query = locationNameInput.value;
-    if (!query) return;
+    const query = typeof locationNameInput?.value === 'string' ? locationNameInput.value.trim() : '';
+    if (!query) {
+        return;
+    }
+
+    if (Array.isArray(searchSuggestions) && searchSuggestions.length > 0) {
+        const index = activeSuggestionIndex >= 0 ? activeSuggestionIndex : 0;
+        selectSearchSuggestion(index);
+        return;
+    }
 
     searchBtn.disabled = true;
     searchBtn.innerHTML = '<div class="spinner w-5 h-5 border-2 rounded-full"></div>';
 
     try {
-        // Use Nominatim for free geocoding
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
-        if (!response.ok) throw new Error('Network response was not ok');
+        const { suggestions, error } = await loadSearchSuggestions(query, { autopickSingleResult: true });
+        if (error) {
+            throw error;
+        }
 
-        const data = await response.json();
-
-        if (data && data.length > 0) {
-            const { lat, lon, display_name } = data[0];
-            targetName = display_name;
-            locationNameInput.value = targetName;
-            selectLocation(parseFloat(lat), parseFloat(lon), targetName);
-        } else {
+        if (!suggestions || suggestions.length === 0) {
             alert('לא נמצאו תוצאות עבור החיפוש.');
+            clearSearchSuggestions({ abort: true, resetQuery: false });
+            return;
+        }
+
+        if (Array.isArray(searchSuggestions) && searchSuggestions.length > 1) {
+            locationNameInput?.focus();
         }
     } catch (error) {
         console.error('Error searching location:', error);
@@ -964,9 +1510,6 @@ async function handleSearchLocation() {
         searchBtn.disabled = false;
         searchBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" /></svg>`;
     }
-
-    renderVisitedLocationsOnMap();
-    updateState();
 }
 
 function selectLocation(lat, lon, name, id = null, options = {}) {

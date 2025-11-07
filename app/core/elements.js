@@ -12,6 +12,7 @@ export function getElements() {
         mapContainer: document.getElementById('map'),
         searchBtn: document.getElementById('search-btn'),
         locationNameInput: document.getElementById('location-name-input'),
+        searchSuggestionsList: document.getElementById('search-suggestions'),
         gpsStatusBtn: document.getElementById('gps-status-btn'),
         allLocationsList: document.getElementById('all-locations-list'),
         waitingLocationName: document.getElementById('waiting-location-name'),
