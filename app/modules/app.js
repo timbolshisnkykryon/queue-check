@@ -129,14 +129,6 @@ export function initializeApplication(context) {
         gpsCountdownEl.style.setProperty('display', 'none', 'important');
     }
 
-    const POPUP_VISIBILITY_ATTEMPT_KEY = '__queueCheckPopupEnsureAttempts';
-    const DEFAULT_VISIBILITY_PADDING = Object.freeze({
-        top: 32,
-        bottom: 40,
-        left: 16,
-        right: 16
-    });
-
     const ALLOWED_POI_AMENITIES = new Set(['restaurant', 'cafe', 'bar']);
 
     function updateState() {
@@ -185,11 +177,54 @@ export function initializeApplication(context) {
     }
 
     const NOMINATIM_SEARCH_ENDPOINT = 'https://nominatim.openstreetmap.org/search';
-    const SEARCH_SUGGESTION_LIMIT = 6;
+    const SEARCH_SUGGESTION_LIMIT = 12;
     const SEARCH_SUGGESTION_DEBOUNCE_MS = 320;
     const MIN_SEARCH_QUERY_LENGTH = 2;
     const SUGGESTION_ID_PREFIX = 'search-suggestion-option';
     const DEFAULT_SUGGESTION_EMOJI = '📍';
+
+    function normalizeSearchText(value) {
+        return typeof value === 'string'
+            ? value
+                .trim()
+                .toLocaleLowerCase('he-IL')
+            : '';
+    }
+
+    function suggestionMatchesQuery(suggestion, normalizedQuery) {
+        if (!normalizedQuery) {
+            return true;
+        }
+
+        const fields = [
+            suggestion.mainText,
+            suggestion.displayName,
+            suggestion.secondaryText,
+            ...(Array.isArray(suggestion.placeInfo?.addressLines)
+                ? suggestion.placeInfo.addressLines
+                : [])
+        ];
+
+        return fields.some((field) => normalizeSearchText(field).includes(normalizedQuery));
+    }
+
+    function scoreSuggestionRelevance(suggestion, normalizedQuery) {
+        if (!normalizedQuery) {
+            return 0;
+        }
+
+        const main = normalizeSearchText(suggestion.mainText);
+        const display = normalizeSearchText(suggestion.displayName);
+        const secondary = normalizeSearchText(suggestion.secondaryText);
+
+        if (main.startsWith(normalizedQuery)) return 0;
+        if (display.startsWith(normalizedQuery)) return 1;
+        if (secondary.startsWith(normalizedQuery)) return 2;
+        if (main.includes(normalizedQuery)) return 3;
+        if (display.includes(normalizedQuery)) return 4;
+        if (secondary.includes(normalizedQuery)) return 5;
+        return 6;
+    }
 
     function abortPendingSearchSuggestions() {
         if (searchFetchTimeoutId) {
@@ -662,31 +697,52 @@ export function initializeApplication(context) {
             }
 
             const suggestions = payload.map(createSuggestionFromResult).filter(Boolean);
-            searchSuggestions = suggestions;
+            const normalizedQuery = normalizeSearchText(trimmed);
+            const relevantSuggestions = suggestions.filter((suggestion) =>
+                suggestionMatchesQuery(suggestion, normalizedQuery)
+            );
 
-            if (suggestions.length === 0) {
+            const rankedSuggestions = (relevantSuggestions.length > 0 ? relevantSuggestions : suggestions)
+                .map((suggestion) => ({
+                    suggestion,
+                    score: scoreSuggestionRelevance(suggestion, normalizedQuery)
+                }))
+                .sort((a, b) => {
+                    if (a.score !== b.score) {
+                        return a.score - b.score;
+                    }
+
+                    const aLength = (a.suggestion.displayName || '').length;
+                    const bLength = (b.suggestion.displayName || '').length;
+                    return aLength - bLength;
+                })
+                .map((entry) => entry.suggestion);
+
+            searchSuggestions = rankedSuggestions;
+
+            if (rankedSuggestions.length === 0) {
                 activeSuggestionIndex = -1;
                 renderSearchSuggestions();
                 updateState();
                 return { suggestions: [] };
             }
 
-            if (activeSuggestionIndex >= suggestions.length) {
+            if (activeSuggestionIndex >= rankedSuggestions.length) {
                 activeSuggestionIndex = -1;
             }
 
-            if (!triggeredByInput && suggestions.length === 1) {
+            if (!triggeredByInput && rankedSuggestions.length === 1) {
                 activeSuggestionIndex = 0;
             }
 
             renderSearchSuggestions();
             updateState();
 
-            if (autopickSingleResult && suggestions.length === 1) {
+            if (autopickSingleResult && rankedSuggestions.length === 1) {
                 selectSearchSuggestion(0, { focusInput: false });
             }
 
-            return { suggestions };
+            return { suggestions: rankedSuggestions };
         } catch (error) {
             if (error?.name === 'AbortError') {
                 return { suggestions: [] };
@@ -1145,20 +1201,12 @@ function renderPointsOfInterest(elements) {
             className: 'poi-tooltip'
         });
 
-        marker.bindPopup(buildPoiPopupContent(place), {
-            className: 'poi-popup',
-            autoPan: true,
-            maxWidth: 280,
-            minWidth: 200
-        });
-
         marker.on('click', () => {
             const locationId = `poi_${place.sourceType}_${place.id}`;
             if (locationNameInput) {
                 locationNameInput.value = place.displayName;
             }
             selectLocation(place.lat, place.lon, place.displayName, locationId, { placeInfo: place });
-            marker.openPopup();
         });
     }
 
@@ -1415,64 +1463,6 @@ function createPoiIcon(place) {
     });
 }
 
-function buildPoiPopupContent(place) {
-    const details = [];
-    if (place?.category?.label) {
-        details.push(`<li><span class="font-medium text-gray-700">סוג:</span> ${escapeHtml(place.category.label)}</li>`);
-    }
-
-    if (Array.isArray(place?.addressLines) && place.addressLines.length > 0) {
-        details.push(`<li><span class="font-medium text-gray-700">כתובת:</span> ${escapeHtml(place.addressLines.join(', '))}</li>`);
-    }
-
-    if (Array.isArray(place?.infoLines)) {
-        for (const line of place.infoLines) {
-            if (line?.label && line?.value) {
-                details.push(`<li><span class="font-medium text-gray-700">${escapeHtml(line.label)}:</span> ${escapeHtml(line.value)}</li>`);
-            }
-        }
-    }
-
-    if (place?.openingHours && !place.infoLines.some((line) => line.label === 'שעות פתיחה')) {
-        details.push(`<li><span class="font-medium text-gray-700">שעות פתיחה:</span> ${escapeHtml(place.openingHours)}</li>`);
-    }
-
-    if (place?.phone) {
-        details.push(`<li><span class="font-medium text-gray-700">טלפון:</span> ${escapeHtml(place.phone)}</li>`);
-    }
-
-    if (place?.website || place?.websiteLabel) {
-        const websiteHref = place?.website ? escapeHtml(place.website) : '';
-        const rawLabel = typeof place?.websiteLabel === 'string' && place.websiteLabel.trim()
-            ? place.websiteLabel.trim()
-            : place?.website || '';
-        const websiteLabel = rawLabel.replace(/^https?:\/\//, '');
-        if (websiteHref) {
-            details.push(`<li><span class="font-medium text-gray-700">אתר:</span> <a href="${websiteHref}" target="_blank" rel="noopener" class="text-blue-600 underline">${escapeHtml(websiteLabel)}</a></li>`);
-        } else if (websiteLabel) {
-            details.push(`<li><span class="font-medium text-gray-700">אתר:</span> ${escapeHtml(websiteLabel)}</li>`);
-        }
-    }
-
-    const detailsHtml = details.length > 0
-        ? `<ul class="poi-popup__list">${details.join('')}</ul>`
-        : `<p class="text-sm text-gray-500">מידע נוסף לא זמין למקום זה.</p>`;
-
-    return `
-        <div class="poi-popup__content">
-            <div class="poi-popup__header">
-                <span class="poi-popup__emoji" aria-hidden="true">${escapeHtml(place?.category?.emoji || '📍')}</span>
-                <div>
-                    <h3 class="poi-popup__title">${escapeHtml(place.displayName)}</h3>
-                    <p class="poi-popup__subtitle">מידע מאתר OpenStreetMap</p>
-                </div>
-            </div>
-            ${detailsHtml}
-            <p class="poi-popup__hint">לחיצה על הסמן בחרה את המקום לצ'ק-אין.</p>
-        </div>
-    `;
-}
-
 async function handleSearchLocation() {
     const query = typeof locationNameInput?.value === 'string' ? locationNameInput.value.trim() : '';
     if (!query) {
@@ -1625,10 +1615,7 @@ function renderSelectedPlaceInfoSection(placeInfo) {
         <div class="selected-place-info bg-blue-50 border border-blue-100 rounded-lg p-4 mb-4">
             <div class="flex items-center gap-3">
                 <div class="selected-place-info__icon" aria-hidden="true">${escapeHtml(emoji)}</div>
-                <div>
-                    <p class="text-sm font-semibold text-blue-900">${escapeHtml(categoryLabel)}</p>
-                    <p class="text-xs text-blue-800/70">מידע מתוך קהילת OpenStreetMap</p>
-                </div>
+                <p class="text-sm font-semibold text-blue-900">${escapeHtml(categoryLabel)}</p>
             </div>
             ${addressHtml}
             ${detailsHtml}
@@ -1642,19 +1629,30 @@ function showLocationCard(name, id) {
     if (!targetDetailsCard) return;
     const locationData = getLocationFromCache(id) || { id, name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords), intel: null };
 
-    const avgTimeDisplay = locationData.totalCheckIns > 0
+    const overallAverageDisplay = locationData.totalCheckIns > 0
         ? formatDurationWithUnits(locationData.avgWaitSeconds)
         : "אין עדיין מידע";
 
     const stats = computeLocationStats(locationData.visits);
     const { dayIndex, hourIndex } = getCurrentTimeContext();
     const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
+    const todaysAverageSeconds = computeDailyAverageWaitSeconds(todaysHourly);
+    const todaysAverageDisplay = formatDurationWithUnits(todaysAverageSeconds);
     const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
     const hourlyChartHtml = renderHourlyChart(todaysHourly, hourIndex, {
         variant: 'app',
         emptyMessage: 'אין עדיין נתונים לשעות היום במיקום זה.'
     });
-    const weeklySummaryHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
+    const weeklyHasData = Array.isArray(stats.weeklyAverages)
+        && stats.weeklyAverages.some((value) => Number.isFinite(value) && value > 0);
+    const weeklySummaryPreviewHtml = weeklyHasData
+        ? renderWeeklySummary(stats.weeklyAverages, dayIndex, {
+            variant: 'app',
+            emptyMessage: 'אין עדיין נתונים שבועיים עבור מיקום זה.',
+            compact: true
+        })
+        : '';
+    const weeklySummaryExpandedHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
         variant: 'app',
         emptyMessage: 'אין עדיין נתונים שבועיים עבור מיקום זה.'
     });
@@ -1676,28 +1674,40 @@ function showLocationCard(name, id) {
             </button>
         </div>
         ${placeInfoHtml}
+        <div class="bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500 text-white rounded-xl p-4 mb-4 shadow-sm">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-xs uppercase tracking-wide text-blue-100">ממוצע ההמתנה היום</p>
+                    <p class="text-2xl font-bold">${todaysAverageDisplay}</p>
+                </div>
+                <div class="sm:text-right">
+                    <p class="text-xs uppercase tracking-wide text-blue-100">מצב נוכחי</p>
+                    <p class="text-xs text-blue-100/80 mb-1">${DAY_NAMES_HE[dayIndex]} · ${formatHourLabel(hourIndex)}</p>
+                    <p class="text-lg font-semibold">${currentHourStats.label}</p>
+                </div>
+            </div>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
             <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
-                <div class="font-semibold text-gray-700">זמן המתנה ממוצע</div>
-                <div class="text-blue-600 font-semibold">${avgTimeDisplay}</div>
+                <div class="font-semibold text-gray-700">ממוצע כללי</div>
+                <div class="text-blue-600 font-semibold">${overallAverageDisplay}</div>
             </div>
             <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
                 <div class="font-semibold text-gray-700">סה"כ צ'ק-אינים</div>
                 <div class="text-blue-600 font-semibold">${locationData.totalCheckIns}</div>
-            </div>
-            <div class="bg-blue-50 rounded-lg p-3 text-blue-900 sm:col-span-2">
-                <div class="font-semibold">שעה נוכחית (${DAY_NAMES_HE[dayIndex]} · ${formatHourLabel(hourIndex)})</div>
-                <div>${currentHourStats.label}</div>
             </div>
         </div>
         <div class="bg-white border border-blue-100 rounded-lg p-3 mb-4">
             <h4 class="text-sm font-semibold text-gray-700">ממוצע לפי שעה (היום)</h4>
             ${hourlyChartHtml}
         </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-3 mb-4">
-            <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
-            ${weeklySummaryHtml}
-        </div>
+        <details class="bg-white border border-gray-200 rounded-lg p-3 mb-4" ${weeklyHasData ? '' : 'open'}>
+            <summary class="flex flex-col gap-2 cursor-pointer text-sm font-semibold text-gray-700">
+                <span>מבט שבועי</span>
+                ${weeklyHasData ? `<div class="text-xs text-gray-600">${weeklySummaryPreviewHtml}</div>` : ''}
+            </summary>
+            <div class="mt-3 text-sm text-gray-600 leading-relaxed">${weeklySummaryExpandedHtml}</div>
+        </details>
         <div class="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-4">
             <div class="flex items-center justify-between gap-3">
                 <div>
@@ -2313,6 +2323,24 @@ function computeLocationStats(visits) {
     return { hourlyAverages, weeklyAverages, counts };
 }
 
+function computeDailyAverageWaitSeconds(hourlyValues) {
+    if (!Array.isArray(hourlyValues) || hourlyValues.length === 0) {
+        return null;
+    }
+
+    let total = 0;
+    let count = 0;
+
+    for (const value of hourlyValues) {
+        if (Number.isFinite(value) && value > 0) {
+            total += value;
+            count += 1;
+        }
+    }
+
+    return count > 0 ? total / count : null;
+}
+
 function renderHourlyChart(hourlyData, highlightHour, options = {}) {
     if (!Array.isArray(hourlyData) || hourlyData.length === 0) {
         return options.variant === 'map'
@@ -2751,102 +2779,6 @@ function getElementHeightIfVisible(element) {
     return rect.height;
 }
 
-function applyVisitedLocationPopupOptions(popup, popupOptions = {}) {
-    if (!popup || !popupOptions) {
-        return;
-    }
-
-    if (Number.isFinite(popupOptions.maxWidth)) {
-        popup.options.maxWidth = popupOptions.maxWidth;
-    }
-
-    if (Number.isFinite(popupOptions.minWidth)) {
-        popup.options.minWidth = popupOptions.minWidth;
-    }
-
-    if (popupOptions.autoPanPadding) {
-        popup.options.autoPanPadding = popupOptions.autoPanPadding;
-    }
-
-    if (popupOptions.autoPanPaddingTopLeft) {
-        popup.options.autoPanPaddingTopLeft = popupOptions.autoPanPaddingTopLeft;
-    }
-
-    if (popupOptions.autoPanPaddingBottomRight) {
-        popup.options.autoPanPaddingBottomRight = popupOptions.autoPanPaddingBottomRight;
-    }
-
-    popup.__queueCheckVisibilityPadding = popupOptions.visibilityPadding || DEFAULT_VISIBILITY_PADDING;
-}
-
-function resetPopupVisibilityAttempts(popup) {
-    if (!popup) {
-        return;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(popup, POPUP_VISIBILITY_ATTEMPT_KEY)) {
-        delete popup[POPUP_VISIBILITY_ATTEMPT_KEY];
-    }
-}
-
-function ensurePopupVisible(popup, popupOptions = null) {
-    if (!popup || !map) {
-        return;
-    }
-
-    const latLng = typeof popup.getLatLng === 'function' ? popup.getLatLng() : null;
-    if (!latLng) {
-        return;
-    }
-
-    if (popup[POPUP_VISIBILITY_ATTEMPT_KEY]) {
-        return;
-    }
-
-    const mapSize = typeof map.getSize === 'function' ? map.getSize() : null;
-    if (!mapSize || mapSize.x <= 0 || mapSize.y <= 0) {
-        if (typeof map.once === 'function') {
-            map.once('resize', () => ensurePopupVisible(popup, popupOptions));
-        }
-        return;
-    }
-
-    const options = popupOptions || getVisitedLocationPopupOptions();
-
-    const visibilityPadding = (options && options.visibilityPadding)
-        || popup.__queueCheckVisibilityPadding
-        || DEFAULT_VISIBILITY_PADDING;
-
-    const topLeftPadding = options?.autoPanPaddingTopLeft
-        || createLeafletPoint(
-            visibilityPadding.left ?? DEFAULT_VISIBILITY_PADDING.left,
-            visibilityPadding.top ?? DEFAULT_VISIBILITY_PADDING.top
-        );
-
-    const bottomRightPadding = options?.autoPanPaddingBottomRight
-        || createLeafletPoint(
-            visibilityPadding.right ?? DEFAULT_VISIBILITY_PADDING.right,
-            visibilityPadding.bottom ?? DEFAULT_VISIBILITY_PADDING.bottom
-        );
-
-    const panOptions = {
-        paddingTopLeft: topLeftPadding,
-        paddingBottomRight: bottomRightPadding,
-        animate: true,
-        duration: 0.35,
-        easeLinearity: 0.25,
-        noMoveStart: true
-    };
-
-    popup[POPUP_VISIBILITY_ATTEMPT_KEY] = true;
-
-    if (typeof map.panInside === 'function') {
-        map.panInside(latLng, panOptions);
-    } else {
-        map.panTo(latLng, panOptions);
-    }
-}
-
 function renderVisitedLocationsOnMap() {
     if (!map) return;
 
@@ -2884,10 +2816,6 @@ function renderVisitedLocationsOnMap() {
             lastVisitAt: data?.visits?.[0]?.timestamp ?? data?.lastUpdatedAt ?? null
         };
 
-        let popupOptions = getVisitedLocationPopupOptions();
-        let lastPopupOptions = popupOptions;
-        const popupContent = buildVisitedLocationPopupContent(locationDetails, popupOptions);
-
         marker.bindTooltip(locationName, {
             permanent: true,
             direction: 'top',
@@ -2896,216 +2824,15 @@ function renderVisitedLocationsOnMap() {
             className: 'map-location-label'
         });
 
-        const popupConfig = {
-            maxWidth: popupOptions.maxWidth,
-            minWidth: popupOptions.minWidth,
-            autoPan: true,
-            closeButton: true,
-            className: 'visited-location-popup'
-        };
-
-        if (popupOptions.autoPanPadding) {
-            popupConfig.autoPanPadding = popupOptions.autoPanPadding;
-        }
-
-        if (popupOptions.autoPanPaddingTopLeft) {
-            popupConfig.autoPanPaddingTopLeft = popupOptions.autoPanPaddingTopLeft;
-        }
-
-        if (popupOptions.autoPanPaddingBottomRight) {
-            popupConfig.autoPanPaddingBottomRight = popupOptions.autoPanPaddingBottomRight;
-        }
-
-        marker.bindPopup(popupContent, popupConfig);
-
-        const initialPopup = marker.getPopup();
-        if (initialPopup) {
-            applyVisitedLocationPopupOptions(initialPopup, popupOptions);
-        }
-
         marker.on('click', () => {
             if (locationNameInput) {
                 locationNameInput.value = locationName;
             }
             selectLocation(lat, lon, locationName, id);
-
-            const popup = marker.getPopup();
-            if (popup) {
-                popupOptions = getVisitedLocationPopupOptions();
-                lastPopupOptions = popupOptions;
-                applyVisitedLocationPopupOptions(popup, popupOptions);
-                popup.setContent(buildVisitedLocationPopupContent(locationDetails, popupOptions));
-                popup.update();
-                resetPopupVisibilityAttempts(popup);
-            }
-
-            marker.openPopup();
-        });
-
-        marker.on('popupopen', (event) => {
-            const popup = event?.popup || marker.getPopup();
-            if (!popup) {
-                return;
-            }
-
-            const optionsForVisibility = lastPopupOptions || popupOptions || getVisitedLocationPopupOptions();
-            ensurePopupVisible(popup, optionsForVisibility);
-        });
-
-        marker.on('popupclose', (event) => {
-            const popup = event?.popup || marker.getPopup();
-            resetPopupVisibilityAttempts(popup);
         });
     }
 
     updateState();
-}
-
-function getVisitedLocationPopupOptions() {
-    const fallbackOptions = {
-        maxWidth: 240,
-        minWidth: 180,
-        maxHeight: 280,
-        autoPanPadding: createLeafletPoint(24, 36),
-        autoPanPaddingTopLeft: createLeafletPoint(24, 36),
-        autoPanPaddingBottomRight: createLeafletPoint(24, 36),
-        visibilityPadding: DEFAULT_VISIBILITY_PADDING
-    };
-
-    if (!map || typeof map.getSize !== 'function') {
-        return fallbackOptions;
-    }
-
-    const mapSize = map.getSize();
-    const mapWidth = Number.isFinite(mapSize?.x) && mapSize.x > 0 ? mapSize.x : 0;
-    const mapHeight = Number.isFinite(mapSize?.y) && mapSize.y > 0 ? mapSize.y : 0;
-
-    if (mapWidth <= 0 || mapHeight <= 0) {
-        return fallbackOptions;
-    }
-
-    const safeAreaTop = getSafeAreaInset('top');
-    const safeAreaBottom = getSafeAreaInset('bottom');
-    const headerHeight = getElementHeightIfVisible(mainHeader);
-    const navHeight = getElementHeightIfVisible(tabNavigation);
-    const searchHeight = getElementHeightIfVisible(mapSearchBar);
-    const gpsButtonHeight = getElementHeightIfVisible(gpsStatusBtn);
-    const targetCardVisible = targetDetailsCard && targetDetailsCard.getAttribute('aria-hidden') === 'false';
-    const targetCardHeight = targetCardVisible ? getElementHeightIfVisible(targetDetailsCard) : 0;
-
-    const topOverlayHeight = safeAreaTop + headerHeight + navHeight + searchHeight;
-    const bottomOverlayHeight = safeAreaBottom + gpsButtonHeight + targetCardHeight;
-
-    const horizontalPadding = Math.max(18, Math.floor(mapWidth * 0.08));
-    const visibilityTop = Math.max(28, Math.round(topOverlayHeight + 16));
-    const visibilityBottom = Math.max(32, Math.round(bottomOverlayHeight + 20));
-
-    const baselineMaxHeight = Math.max(160, Math.floor(mapHeight * 0.55));
-    let availableHeight = mapHeight - (visibilityTop + visibilityBottom) - 32;
-    if (!Number.isFinite(availableHeight)) {
-        availableHeight = baselineMaxHeight;
-    }
-
-    const minReasonableHeight = Math.max(160, Math.floor(mapHeight * 0.35));
-    if (Number.isFinite(availableHeight) && availableHeight > 0) {
-        availableHeight = Math.max(minReasonableHeight, Math.floor(availableHeight));
-    } else {
-        availableHeight = minReasonableHeight;
-    }
-
-    const maxHeight = Math.min(Math.max(minReasonableHeight, availableHeight), Math.min(baselineMaxHeight, 420));
-
-    const maxWidth = Math.max(200, Math.min(Math.floor(mapWidth * 0.5), 360));
-    const minWidth = Math.min(Math.max(180, Math.floor(mapWidth * 0.36)), maxWidth);
-
-    const maxPanPadding = Math.max(56, Math.floor(mapHeight * 0.8));
-    const topPanPadding = Math.min(
-        maxPanPadding,
-        Math.max(Math.floor(mapHeight * 0.24), visibilityTop + Math.ceil(maxHeight * 0.6))
-    );
-    const bottomPanPadding = Math.min(
-        maxPanPadding,
-        Math.max(Math.floor(mapHeight * 0.2), visibilityBottom + Math.ceil(maxHeight * 0.4))
-    );
-
-    const autoPanPaddingTopLeft = createLeafletPoint(horizontalPadding, topPanPadding);
-    const autoPanPaddingBottomRight = createLeafletPoint(horizontalPadding, bottomPanPadding);
-    const autoPanPadding = createLeafletPoint(horizontalPadding, Math.max(topPanPadding, bottomPanPadding));
-
-    return {
-        maxWidth,
-        minWidth,
-        maxHeight,
-        autoPanPadding,
-        autoPanPaddingTopLeft,
-        autoPanPaddingBottomRight,
-        visibilityPadding: {
-            top: visibilityTop,
-            bottom: visibilityBottom,
-            left: horizontalPadding,
-            right: horizontalPadding
-        }
-    };
-}
-
-function buildVisitedLocationPopupContent(locationData, popupOptions = {}) {
-    const totalCheckIns = Number.isFinite(Number(locationData.totalCheckIns))
-        ? Number(locationData.totalCheckIns)
-        : 0;
-
-    const avgWaitSeconds = Number.isFinite(Number(locationData.avgWaitSeconds)) && Number(locationData.avgWaitSeconds) > 0
-        ? Number(locationData.avgWaitSeconds)
-        : null;
-
-    const lastVisitAt = locationData.lastVisitAt || null;
-
-    const totalCheckInsText = totalCheckIns > 0
-        ? totalCheckIns.toLocaleString('he-IL')
-        : '—';
-
-    const avgWaitText = avgWaitSeconds
-        ? formatDuration(avgWaitSeconds)
-        : 'לא זמין';
-
-    const lastVisitText = lastVisitAt
-        ? formatTimestamp(lastVisitAt)
-        : 'לא נרשם';
-
-    const styleAttributes = [];
-    if (popupOptions.minWidth) {
-        styleAttributes.push(`min-width:${popupOptions.minWidth}px`);
-    }
-    if (popupOptions.maxWidth) {
-        styleAttributes.push(`max-width:${popupOptions.maxWidth}px`);
-    }
-    if (popupOptions.maxHeight) {
-        styleAttributes.push(`max-height:${popupOptions.maxHeight}px`);
-        styleAttributes.push('overflow-y:auto');
-    }
-
-    const styleAttribute = styleAttributes.length > 0
-        ? ` style="${styleAttributes.join(';')}"`
-        : '';
-
-    return `
-        <div class="visited-location-popup__content"${styleAttribute}>
-            <h3 class="visited-location-popup__title">${escapeHtml(locationData.name || 'מיקום ללא שם')}</h3>
-            <dl class="visited-location-popup__stats">
-                <div>
-                    <dt>סה"כ ביקורים</dt>
-                    <dd>${escapeHtml(totalCheckInsText)}</dd>
-                </div>
-                <div>
-                    <dt>המתנה ממוצעת</dt>
-                    <dd>${escapeHtml(avgWaitText)}</dd>
-                </div>
-                <div>
-                    <dt>ביקור אחרון</dt>
-                    <dd>${escapeHtml(lastVisitText)}</dd>
-                </div>
-            </dl>
-        </div>
-    `;
 }
 
 function formatDuration(seconds) {
