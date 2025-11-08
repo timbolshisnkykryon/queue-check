@@ -1084,23 +1084,25 @@ async function fetchNearbyPlaces() {
         poiFetchAbortController.abort();
     }
 
-    const coords = lastKnownPosition?.coords;
-    const userLat = Number(coords?.latitude);
-    const userLon = Number(coords?.longitude);
+    const center = map.getCenter();
+    const centerLat = Number(center?.lat);
+    const centerLon = Number(center?.lng);
 
-    if (!Number.isFinite(userLat) || !Number.isFinite(userLon)) {
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
+        poiPlaces = [];
         if (poiLayer) {
             poiLayer.clearLayers();
         }
         lastPoiFetchBounds = null;
-        setNearbyPanelVisible(false);
+        renderNearbyPanelPlaceholder('לא ניתן לזהות את מרכז המפה. נסו לגרור או להתקרב מחדש.');
+        setNearbyPanelVisible(true);
         updateState();
         return;
     }
 
     const fetchContext = {
-        lat: Number(userLat.toFixed(5)),
-        lon: Number(userLon.toFixed(5)),
+        lat: centerLat,
+        lon: centerLon,
         radius: Number(NEARBY_PLACES_RADIUS_METERS)
     };
 
@@ -1113,6 +1115,9 @@ async function fetchNearbyPlaces() {
     updateState();
 
     const query = buildOverpassPlacesQuery(fetchContext);
+
+    renderNearbyPanelPlaceholder('טוען מקומות באזור התצוגה הנוכחי...');
+    setNearbyPanelVisible(true);
 
     try {
         const response = await fetch('https://overpass-api.de/api/interpreter', {
@@ -1134,13 +1139,15 @@ async function fetchNearbyPlaces() {
         }
 
         const elements = Array.isArray(data?.elements) ? data.elements : [];
-        renderPointsOfInterest(elements);
+        renderPointsOfInterest(elements, fetchContext);
     } catch (error) {
         if (error?.name === 'AbortError') {
             return;
         }
         console.error('Failed to fetch nearby places', error);
-        setNearbyPanelVisible(false);
+        poiPlaces = [];
+        renderNearbyPanelPlaceholder('לא הצלחנו לטעון מקומות באזור הזה. נסו שוב בעוד רגע.');
+        setNearbyPanelVisible(true);
     } finally {
         if (poiFetchAbortController?.signal === signal) {
             poiFetchAbortController = null;
@@ -1175,7 +1182,7 @@ out center 60;
 `;
 }
 
-function renderPointsOfInterest(elements) {
+function renderPointsOfInterest(elements, fetchContext) {
     if (!map) {
         return;
     }
@@ -1205,20 +1212,19 @@ function renderPointsOfInterest(elements) {
         }
     }
 
-    const coords = lastKnownPosition?.coords;
-    const userLat = Number(coords?.latitude);
-    const userLon = Number(coords?.longitude);
+    const referenceLat = Number(fetchContext?.lat);
+    const referenceLon = Number(fetchContext?.lon);
 
     let prioritizedPlaces = places.slice();
 
-    if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+    if (Number.isFinite(referenceLat) && Number.isFinite(referenceLon)) {
         prioritizedPlaces = places
             .map((place) => {
                 if (!place || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) {
                     return null;
                 }
 
-                const distance = calculateDistanceMeters(userLat, userLon, place.lat, place.lon);
+                const distance = calculateDistanceMeters(referenceLat, referenceLon, place.lat, place.lon);
                 if (!Number.isFinite(distance)) {
                     return null;
                 }
@@ -1253,33 +1259,43 @@ function renderPointsOfInterest(elements) {
         });
     }
 
-    const hasNearby = updateNearbyLocationsPanel();
-    setNearbyPanelVisible(lastKnownPosition ? hasNearby : false);
+    const hasNearby = updateNearbyLocationsPanel(fetchContext);
+    if (!hasNearby && Array.isArray(poiPlaces) && poiPlaces.length === 0) {
+        renderNearbyPanelPlaceholder('לא נמצאו מקומות באזור התצוגה. נסו לשנות את המפה.');
+    }
+    setNearbyPanelVisible(true);
 
     updateState();
 }
 
-function updateNearbyLocationsPanel() {
+function renderNearbyPanelPlaceholder(message) {
+    if (!nearbyLocationsList) {
+        return;
+    }
+
+    const safeMessage = typeof message === 'string' && message.trim().length > 0
+        ? message
+        : 'לא נמצאו מקומות להצגה באזור זה.';
+
+    nearbyLocationsList.innerHTML = `<li class="nearby-panel__empty" role="presentation">${escapeHtml(safeMessage)}</li>`;
+}
+
+function updateNearbyLocationsPanel(referencePoint = lastPoiFetchBounds) {
     if (!nearbyLocationsPanel || !nearbyLocationsList) {
         return false;
     }
 
     if (!Array.isArray(poiPlaces) || poiPlaces.length === 0) {
-        nearbyLocationsList.innerHTML = '';
+        renderNearbyPanelPlaceholder('לא נמצאו מקומות באזור התצוגה.');
         return false;
     }
 
-    const coords = lastKnownPosition?.coords;
-    if (!coords) {
-        nearbyLocationsList.innerHTML = '';
-        return false;
-    }
+    const fallbackCenter = map?.getCenter();
+    const referenceLat = Number(referencePoint?.lat ?? fallbackCenter?.lat);
+    const referenceLon = Number(referencePoint?.lon ?? fallbackCenter?.lng);
 
-    const userLat = Number(coords.latitude);
-    const userLon = Number(coords.longitude);
-
-    if (!Number.isFinite(userLat) || !Number.isFinite(userLon)) {
-        nearbyLocationsList.innerHTML = '';
+    if (!Number.isFinite(referenceLat) || !Number.isFinite(referenceLon)) {
+        renderNearbyPanelPlaceholder('לא ניתן לחשב מרחקים עבור האזור הזה.');
         return false;
     }
 
@@ -1289,8 +1305,8 @@ function updateNearbyLocationsPanel() {
                 return null;
             }
 
-            const distance = calculateDistanceMeters(userLat, userLon, place.lat, place.lon);
-            if (!Number.isFinite(distance) || distance > NEARBY_PLACES_RADIUS_METERS) {
+            const distance = calculateDistanceMeters(referenceLat, referenceLon, place.lat, place.lon);
+            if (!Number.isFinite(distance)) {
                 return null;
             }
 
@@ -1301,7 +1317,7 @@ function updateNearbyLocationsPanel() {
         .slice(0, 10);
 
     if (sorted.length === 0) {
-        nearbyLocationsList.innerHTML = '';
+        renderNearbyPanelPlaceholder('לא נמצאו מקומות באזור התצוגה.');
         return false;
     }
 
@@ -1817,10 +1833,8 @@ function selectLocation(lat, lon, name, id = null, options = {}) {
     showLocationCard(name, currentLocationId);
 
     celebrateSelection();
-    const hasNearby = updateNearbyLocationsPanel();
-    if (lastKnownPosition) {
-        setNearbyPanelVisible(hasNearby);
-    }
+    updateNearbyLocationsPanel();
+    setNearbyPanelVisible(true);
 
     // Ensure map tab is active
     if (document.getElementById('tab-content-locations').classList.contains('active')) {
@@ -1904,7 +1918,7 @@ function renderSelectedPlaceInfoSection(placeInfo) {
                 ${addressLine ? `<p class="location-card__meta-address">${escapeHtml(addressLine)}</p>` : ''}
                 ${detailsHtml}
                 ${websiteHtml}
-                <p class="location-card__meta-hint">לחצו על "התחל צ'ק-אין" כדי לשתף את זמן ההמתנה שלכם במקום זה.</p>
+                <p class="location-card__meta-hint">הקהילה משתפת כאן זמני המתנה מעודכנים בזמן אמת לכל המבקרים.</p>
             </div>
         </section>
     `;
@@ -1993,7 +2007,7 @@ function inferDominantWaitGroup(waitGroupCounts = {}) {
     };
 }
 
-function renderWaitGroupsSection(waitGroupCounts = {}) {
+function renderWaitGroupsSection(waitGroupCounts = {}, latestVisit = null) {
     const categories = Object.values(WAIT_GROUP_CATEGORY_METADATA);
 
     const normalized = (key) => {
@@ -2004,29 +2018,29 @@ function renderWaitGroupsSection(waitGroupCounts = {}) {
         };
     };
 
+    const activeKey = latestVisit ? resolveVisitPartyInfo(latestVisit)?.key || null : null;
     const totals = categories.map(({ key }) => normalized(key));
     const totalReports = totals.reduce((sum, entry) => sum + entry.groups, 0);
-
-    if (totalReports === 0) {
-        return `
-            <section class="wait-groups wait-groups--empty">
-                <h4 class="wait-groups__title">עוד אין נתונים על גודל התור</h4>
-                <p class="wait-groups__hint">שתפו צ'ק-אין כדי לעזור לחברים לדעת כמה אנשים ממתינים.</p>
-            </section>
-        `;
-    }
 
     const itemsHtml = categories
         .map(({ key, label, emoji, rangeLabel, accent }, index) => {
             const data = totals[index];
             const people = Math.round(data.people);
+            const reports = Math.round(data.groups);
             const hasPeople = people > 0;
-            const primaryLabel = hasPeople ? `${people} אנשים` : `${data.groups} דיווחים`;
-            const secondaryLabel = hasPeople
-                ? `${data.groups} דיווחים`
-                : 'מחכים לעוד נתונים';
+            const hasReports = reports > 0;
+            const primaryLabel = hasPeople
+                ? `${people} אנשים ממתינים`
+                : hasReports
+                    ? `${reports} דיווחים`
+                    : 'אין נתונים עדיין';
+            const secondaryLabel = activeKey === key
+                ? 'עודכן ממש עכשיו'
+                : hasReports
+                    ? `${reports} דיווחים אחרונים`
+                    : 'היו הראשונים לעדכן';
 
-            return `<div class="wait-groups__item wait-groups__item--${key}" style="--wait-group-accent: ${escapeHtml(accent)}">
+            return `<div class="wait-groups__item wait-groups__item--${key} ${activeKey === key ? 'wait-groups__item--active' : ''}" style="--wait-group-accent: ${escapeHtml(accent)}">
                 <span class="wait-groups__emoji" aria-hidden="true">${escapeHtml(emoji)}</span>
                 <div class="wait-groups__meta">
                     <p class="wait-groups__label">${escapeHtml(label)}</p>
@@ -2038,13 +2052,17 @@ function renderWaitGroupsSection(waitGroupCounts = {}) {
         })
         .join('');
 
+    const hint = totalReports > 0
+        ? `מבוסס על ${totalReports} צ'ק-אינים אחרונים – מתעדכן בזמן אמת לכל הצופים.`
+        : 'היו הראשונים לשתף צ׳ק-אין – העדכון יוצג מיד לכל מי שצופה במקום.';
+
     return `
         <section class="wait-groups">
-            <h4 class="wait-groups__title">כמות האנשים שממתינים לפי קבוצות</h4>
+            <h4 class="wait-groups__title">מצב התור לפי גודל קבוצה</h4>
             <div class="wait-groups__grid">
                 ${itemsHtml}
             </div>
-            <p class="wait-groups__hint">מבוסס על ${totalReports} צ'ק-אינים אחרונים שנאספו במקום.</p>
+            <p class="wait-groups__hint">${escapeHtml(hint)}</p>
         </section>
     `;
 }
@@ -2052,10 +2070,6 @@ function renderWaitGroupsSection(waitGroupCounts = {}) {
 function showLocationCard(name, id) {
     if (!targetDetailsCard) return;
     const locationData = getLocationFromCache(id) || { id, name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords), intel: null };
-
-    const overallAverageDisplay = locationData.totalCheckIns > 0
-        ? formatDurationWithUnits(locationData.avgWaitSeconds)
-        : "אין עדיין מידע";
 
     const stats = computeLocationStats(locationData.visits);
     const latestVisit = Array.isArray(locationData.visits) && locationData.visits.length > 0
@@ -2075,64 +2089,52 @@ function showLocationCard(name, id) {
         maxLength: 240
     });
     const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
-    const waitSnapshotSection = renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts);
-    const waitGroupsSection = renderWaitGroupsSection(stats.waitGroupCounts);
-    const lastUpdateRaw = locationData?.visits?.[0]?.timestamp ?? locationData?.lastUpdatedAt ?? null;
-    const lastUpdatedLabel = lastUpdateRaw
-        ? `עודכן לאחרונה: ${formatTimestamp(lastUpdateRaw)}`
-        : 'טרם נאספו נתוני המתנה כאן';
+    const waitGroupsSection = renderWaitGroupsSection(stats.waitGroupCounts, latestVisit);
+    const hourlyAverageHtml = `
+        <section class="location-card__hourly" aria-label="ממוצע ההמתנה לשעה זו">
+            <p class="location-card__hourly-title">ממוצע ההמתנה לשעה זו</p>
+            <p class="location-card__hourly-value">${escapeHtml(currentHourStats.label)}</p>
+            <p class="location-card__hourly-hint">${escapeHtml(currentMomentLabel)}</p>
+        </section>
+    `;
+    const intelSubtitle = hasIntel
+        ? 'תובנות בזמן אמת לחוויה חלקה'
+        : 'המידע יופיע כאן לאחר צ׳ק-אין מעודכן של הקהילה';
+    const intelBodyContent = hasIntel
+        ? `${intelPreviewHtml}
+                <button type="button" class="open-intel-modal-btn intel-collapsible__action">פתח סקירה מלאה</button>`
+        : '<p class="intel-collapsible__empty">טרם נאספו תובנות חכמות למיקום זה. ברגע שהקהילה תעדכן – המידע יופיע כאן.</p>';
+    const intelSection = `
+        <details class="location-card__intel intel-collapsible">
+            <summary class="intel-collapsible__summary">
+                <div class="intel-collapsible__summary-text">
+                    <h4 class="intel-collapsible__title">סקירת יעד חכמה</h4>
+                    <p class="intel-collapsible__subtitle">${escapeHtml(intelSubtitle)}</p>
+                </div>
+                <span class="intel-collapsible__chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="intel-collapsible__body ${hasIntel ? 'intel-rich-text' : ''}">
+                ${intelBodyContent}
+            </div>
+        </details>
+    `;
 
     targetDetailsCard.innerHTML = `
         <section class="location-card" aria-label="פרטי המקום ${escapeHtml(name)}">
             <header class="location-card__header">
-                <div>
-                    <h3 class="location-card__title">${escapeHtml(name)}</h3>
-                    <p class="location-card__subtitle">${escapeHtml(lastUpdatedLabel)}</p>
-                </div>
+                <h3 class="location-card__title">${escapeHtml(name)}</h3>
                 <button id="close-location-card-btn" type="button" class="location-card__close" aria-label="סגירת חלון מידע">
                     <span aria-hidden="true">✕</span>
                 </button>
             </header>
             ${placeInfoHtml}
-            ${waitSnapshotSection}
-            <div class="location-card__stat-grid">
-                <div class="location-card__stat location-card__stat--primary">
-                    <p class="location-card__stat-label">ממוצע המתנה</p>
-                    <p class="location-card__stat-value">${overallAverageDisplay}</p>
-                    <p class="location-card__stat-hint">${locationData.totalCheckIns > 0 ? `מבוסס על ${locationData.totalCheckIns} צ'ק-אינים אחרונים` : 'היו הראשונים לשתף המתנה!'}</p>
-                </div>
-                <div class="location-card__stat">
-                    <p class="location-card__stat-label">מצב כרגע</p>
-                    <p class="location-card__stat-value location-card__stat-value--secondary">${currentHourStats.label}</p>
-                    <p class="location-card__stat-hint">${escapeHtml(currentMomentLabel)}</p>
-                </div>
-            </div>
+            ${hourlyAverageHtml}
             ${waitGroupsSection}
-            ${hasIntel ? `
-                <section class="location-card__intel">
-                    <div class="location-card__intel-header">
-                        <div>
-                            <h4 class="location-card__intel-title">סקירת יעד חכמה</h4>
-                            <p class="location-card__intel-subtitle">תובנות בזמן אמת לחוויה חלקה</p>
-                        </div>
-                        <button type="button" class="open-intel-modal-btn location-card__intel-btn">פתח סקירה מלאה</button>
-                    </div>
-                    <div class="location-card__intel-body ${hasIntel ? 'intel-rich-text' : ''}">
-                        ${intelPreviewHtml}
-                    </div>
-                </section>
-            ` : ''}
-            <button id="start-check-in-btn" class="location-card__cta">
-                התחל צ'ק-אין למקום
-            </button>
+            ${intelSection}
         </section>
     `;
 
     const closeBtn = targetDetailsCard.querySelector('#close-location-card-btn');
-    const ctaBtn = document.getElementById('start-check-in-btn');
-    if (ctaBtn) {
-        ctaBtn.onclick = startCheckIn;
-    }
     if (closeBtn) {
         closeBtn.addEventListener('click', hideLocationCard);
     }
@@ -2397,8 +2399,8 @@ function updatePosition(position) {
 
     scheduleNearbyPlacesRefresh({ immediate: true });
 
-    const hasNearby = updateNearbyLocationsPanel();
-    setNearbyPanelVisible(hasNearby);
+    updateNearbyLocationsPanel();
+    setNearbyPanelVisible(true);
 
     // --- Logic for when check-in is ACTIVE ---
     if (checkInStartTime && targetCoords) {

@@ -396,6 +396,15 @@
             transition: transform 160ms ease, background 160ms ease;
         }
 
+        .nearby-panel__empty {
+            padding: 0.9rem 0.75rem;
+            border-radius: 1rem;
+            background: rgba(148, 163, 184, 0.14);
+            color: rgba(226, 232, 240, 0.92);
+            font-size: 0.85rem;
+            text-align: center;
+        }
+
         .nearby-panel__item:hover,
         .nearby-panel__item:focus-visible {
             transform: translateY(-1px) scale(1.01);
@@ -598,6 +607,37 @@
             margin: 0.25rem 0 0;
         }
 
+        .location-card__hourly {
+            margin: 1.1rem 0;
+            padding: 1.15rem 1.25rem;
+            border-radius: 1.2rem;
+            background: linear-gradient(140deg, rgba(59, 130, 246, 0.22), rgba(14, 165, 233, 0.15));
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            box-shadow: 0 18px 32px rgba(15, 23, 42, 0.12);
+            color: #0b1f4a;
+        }
+
+        .location-card__hourly-title {
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            margin: 0 0 0.35rem;
+            color: rgba(15, 23, 42, 0.7);
+        }
+
+        .location-card__hourly-value {
+            font-size: 1.55rem;
+            font-weight: 700;
+            margin: 0;
+            color: #0b1f4a;
+        }
+
+        .location-card__hourly-hint {
+            font-size: 0.75rem;
+            margin: 0.4rem 0 0;
+            color: rgba(15, 23, 42, 0.6);
+        }
+
         .location-card__stat-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -664,32 +704,84 @@
         .location-card__intel {
             background: rgba(37, 99, 235, 0.08);
             border-radius: 1.25rem;
-            padding: 1.25rem;
             border: 1px solid rgba(37, 99, 235, 0.12);
+            overflow: hidden;
         }
 
-        .location-card__intel-header {
+        .intel-collapsible__summary {
             display: flex;
             justify-content: space-between;
             align-items: center;
             gap: 1rem;
-            margin-bottom: 0.75rem;
+            padding: 1.1rem 1.25rem;
+            cursor: pointer;
+            list-style: none;
         }
 
-        .location-card__intel-title {
+        .intel-collapsible__summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .intel-collapsible__summary-text {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .intel-collapsible__title {
             font-size: 1rem;
             font-weight: 700;
             color: #1d4ed8;
             margin: 0;
         }
 
-        .location-card__intel-subtitle {
+        .intel-collapsible__subtitle {
             font-size: 0.8rem;
             color: rgba(30, 64, 175, 0.7);
-            margin: 0.2rem 0 0;
+            margin: 0;
         }
 
-        .location-card__intel-btn {
+        .intel-collapsible__chevron {
+            width: 1.9rem;
+            height: 1.9rem;
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.75);
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1d4ed8;
+            transition: transform 200ms ease, background 200ms ease, box-shadow 200ms ease;
+            box-shadow: 0 12px 22px rgba(59, 130, 246, 0.18);
+        }
+
+        .intel-collapsible__chevron::before {
+            content: '⌄';
+            font-size: 1rem;
+        }
+
+        .intel-collapsible[open] .intel-collapsible__chevron {
+            transform: rotate(180deg);
+            background: rgba(59, 130, 246, 0.22);
+        }
+
+        .intel-collapsible__body {
+            padding: 0 1.25rem 1.25rem;
+            background: rgba(255, 255, 255, 0.75);
+            border-top: 1px solid rgba(191, 219, 254, 0.45);
+            color: #1e3a8a;
+            max-height: 240px;
+            overflow-y: auto;
+        }
+
+        .intel-collapsible__empty {
+            font-size: 0.78rem;
+            color: rgba(30, 64, 175, 0.7);
+            margin: 0;
+        }
+
+        .intel-collapsible__action {
+            margin-top: 0.75rem;
             padding: 0.45rem 0.9rem;
             border-radius: 9999px;
             background: linear-gradient(135deg, #6366f1, #8b5cf6);
@@ -697,20 +789,14 @@
             font-size: 0.75rem;
             font-weight: 600;
             transition: transform 160ms ease, box-shadow 160ms ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
         }
 
-        .location-card__intel-btn:hover {
+        .intel-collapsible__action:hover {
             transform: translateY(-1px);
             box-shadow: 0 15px 25px rgba(99, 102, 241, 0.25);
-        }
-
-        .location-card__intel-body {
-            background: rgba(255, 255, 255, 0.65);
-            border-radius: 1rem;
-            padding: 1rem;
-            max-height: 220px;
-            overflow-y: auto;
-            color: #1e3a8a;
         }
 
         .location-card__cta {
@@ -759,6 +845,12 @@
             padding: 0.8rem 0.9rem;
             border-inline-start: 6px solid var(--wait-group-accent, rgba(37, 99, 235, 0.55));
             overflow: hidden;
+            transition: transform 160ms ease, box-shadow 160ms ease;
+        }
+
+        .wait-groups__item--active {
+            transform: translateY(-2px);
+            box-shadow: 0 18px 32px rgba(37, 99, 235, 0.25);
         }
 
         .wait-groups__item::before {
