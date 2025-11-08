@@ -136,7 +136,17 @@ export function initializeApplication(context) {
         gpsCountdownEl.style.setProperty('display', 'none', 'important');
     }
 
-    const ALLOWED_POI_AMENITIES = new Set(['restaurant', 'cafe', 'bar']);
+    const ALLOWED_AMENITY_VALUES = [
+        'restaurant',
+        'cafe',
+        'bar',
+        'fast_food',
+        'food_court',
+        'ice_cream',
+        'bakery',
+        'pub'
+    ];
+    const ALLOWED_POI_AMENITIES = new Set(ALLOWED_AMENITY_VALUES);
 
     function updateState() {
         Object.assign(state, {
@@ -1088,10 +1098,31 @@ async function fetchNearbyPlaces() {
         return;
     }
 
+    let boundingBox = null;
+    if (map && typeof map.getBounds === 'function') {
+        const bounds = map.getBounds();
+        if (bounds) {
+            const south = Number(bounds.getSouth());
+            const west = Number(bounds.getWest());
+            const north = Number(bounds.getNorth());
+            const east = Number(bounds.getEast());
+
+            if ([south, west, north, east].every((value) => Number.isFinite(value))) {
+                boundingBox = {
+                    south: Number(south.toFixed(5)),
+                    west: Number(west.toFixed(5)),
+                    north: Number(north.toFixed(5)),
+                    east: Number(east.toFixed(5))
+                };
+            }
+        }
+    }
+
     const fetchContext = {
         lat: Number(userLat.toFixed(5)),
         lon: Number(userLon.toFixed(5)),
-        radius: Number(NEARBY_PLACES_RADIUS_METERS)
+        radius: Number(NEARBY_PLACES_RADIUS_METERS),
+        bbox: boundingBox
     };
 
     lastPoiFetchBounds = fetchContext;
@@ -1140,17 +1171,35 @@ async function fetchNearbyPlaces() {
     }
 }
 
-function buildOverpassPlacesQuery({ lat, lon, radius }) {
+function buildOverpassPlacesQuery({ lat, lon, radius, bbox }) {
     const normalizedLat = Number(lat);
     const normalizedLon = Number(lon);
     const normalizedRadius = Math.min(Math.max(Number(radius) || 0, 50), 5000);
+    const amenityPattern = ALLOWED_AMENITY_VALUES
+        .map((value) => value.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
+        .join('|');
+
+    let areaSelector = '';
+    if (
+        bbox
+        && Number.isFinite(bbox.south)
+        && Number.isFinite(bbox.west)
+        && Number.isFinite(bbox.north)
+        && Number.isFinite(bbox.east)
+    ) {
+        areaSelector = `(${bbox.south.toFixed(6)},${bbox.west.toFixed(6)},${bbox.north.toFixed(6)},${bbox.east.toFixed(6)})`;
+    } else if (Number.isFinite(normalizedLat) && Number.isFinite(normalizedLon)) {
+        areaSelector = `(around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)})`;
+    } else {
+        throw new Error('Invalid parameters for Overpass query');
+    }
 
     return `
 [out:json][timeout:25];
 (
-  node["amenity"~"^(restaurant|cafe|bar)$"](around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)});
-  way["amenity"~"^(restaurant|cafe|bar)$"](around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)});
-  rel["amenity"~"^(restaurant|cafe|bar)$"](around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)});
+  node["amenity"~"^(${amenityPattern})$"]${areaSelector};
+  way["amenity"~"^(${amenityPattern})$"]${areaSelector};
+  rel["amenity"~"^(${amenityPattern})$"]${areaSelector};
 );
 out center 60;
 `;
@@ -1190,7 +1239,7 @@ function renderPointsOfInterest(elements) {
     const userLat = Number(coords?.latitude);
     const userLon = Number(coords?.longitude);
 
-    let prioritizedPlaces = places.slice(0, 60);
+    let prioritizedPlaces = places.slice();
 
     if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
         prioritizedPlaces = places
@@ -1200,7 +1249,7 @@ function renderPointsOfInterest(elements) {
                 }
 
                 const distance = calculateDistanceMeters(userLat, userLon, place.lat, place.lon);
-                if (!Number.isFinite(distance) || distance > NEARBY_PLACES_RADIUS_METERS) {
+                if (!Number.isFinite(distance)) {
                     return null;
                 }
 
@@ -1208,10 +1257,7 @@ function renderPointsOfInterest(elements) {
             })
             .filter(Boolean)
             .sort((a, b) => a.distance - b.distance)
-            .slice(0, 10)
             .map(({ place }) => place);
-    } else {
-        prioritizedPlaces = prioritizedPlaces.slice(0, 10);
     }
 
     poiPlaces = prioritizedPlaces;
@@ -1894,12 +1940,91 @@ function renderSelectedPlaceInfoSection(placeInfo) {
     `;
 }
 
+const WAIT_GROUP_CATEGORY_METADATA = Object.freeze({
+    small: { key: 'small', label: 'קבוצות של 1-3', rangeLabel: '1-3', emoji: '👥', accent: '#22c55e' },
+    medium: { key: 'medium', label: 'קבוצות של 4-6', rangeLabel: '4-6', emoji: '👨‍👩‍👧', accent: '#f59e0b' },
+    large: { key: 'large', label: 'קבוצות של 7+', rangeLabel: '7+', emoji: '🎉', accent: '#ef4444' }
+});
+
+function renderCurrentWaitSnapshot(latestVisit, waitGroupCounts = {}) {
+    const latestWaitSeconds = Number(latestVisit?.waitSeconds);
+    const waitLabel = latestWaitSeconds > 0 ? formatDurationWithUnits(latestWaitSeconds) : 'אין נתונים';
+
+    const directPartyInfo = latestVisit ? resolveVisitPartyInfo(latestVisit) : null;
+    const fallbackPartyInfo = directPartyInfo ? null : inferDominantWaitGroup(waitGroupCounts);
+    const partyInfo = directPartyInfo || fallbackPartyInfo;
+
+    if (!partyInfo && !(latestWaitSeconds > 0)) {
+        return `
+            <section class="wait-snapshot wait-snapshot--empty" aria-label="מצב התור העדכני">
+                <div class="wait-snapshot__body">
+                    <p class="wait-snapshot__title">עדיין אין נתוני תור זמינים</p>
+                    <p class="wait-snapshot__metric">התחילו צ'ק-אין ראשון כדי לעדכן את זמן ההמתנה וכמות האנשים בתור.</p>
+                </div>
+            </section>
+        `;
+    }
+
+    const category = partyInfo?.key && WAIT_GROUP_CATEGORY_METADATA[partyInfo.key]
+        ? WAIT_GROUP_CATEGORY_METADATA[partyInfo.key]
+        : null;
+    const accentColor = category?.accent || '#2563eb';
+    const peopleCount = partyInfo?.size ? Math.max(1, Math.round(partyInfo.size)) : 0;
+    const peopleLabel = peopleCount > 0 ? `${peopleCount} אנשים` : 'אין נתונים';
+    const title = category
+        ? `קבוצת ${category.rangeLabel} ממתינה כעת`
+        : 'מצב התור כעת';
+    const badgeHtml = category
+        ? `<span class="wait-snapshot__badge wait-snapshot__badge--${category.key}" aria-hidden="true">${escapeHtml(category.rangeLabel)}</span>`
+        : '';
+
+    return `
+        <section class="wait-snapshot" style="--wait-snapshot-accent: ${escapeHtml(accentColor)}" aria-label="מצב התור העדכני">
+            ${badgeHtml}
+            <div class="wait-snapshot__body">
+                <p class="wait-snapshot__title">${escapeHtml(title)}</p>
+                <p class="wait-snapshot__metric"><span>זמן המתנה אחרון:</span> ${escapeHtml(waitLabel)}</p>
+                <p class="wait-snapshot__metric"><span>אנשים בתור:</span> ${escapeHtml(peopleLabel)}</p>
+            </div>
+        </section>
+    `;
+}
+
+function inferDominantWaitGroup(waitGroupCounts = {}) {
+    let bestKey = null;
+    let bestScore = -Infinity;
+
+    for (const category of Object.values(WAIT_GROUP_CATEGORY_METADATA)) {
+        const data = waitGroupCounts?.[category.key] || {};
+        const people = Number(data.people) || 0;
+        const groups = Number(data.groups) || 0;
+        const score = people > 0 ? people : groups;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestKey = category.key;
+        }
+    }
+
+    if (!bestKey || bestScore <= 0) {
+        return null;
+    }
+
+    const selected = waitGroupCounts[bestKey] || {};
+    const estimatedPeople = Number(selected.people) > 0
+        ? Number(selected.people)
+        : (Number(selected.groups) || 0) * (PARTY_SIZE_ESTIMATES[bestKey] || 0);
+    const fallbackSize = PARTY_SIZE_ESTIMATES[bestKey] || 0;
+    const normalizedSize = estimatedPeople > 0 ? estimatedPeople : fallbackSize;
+
+    return {
+        key: bestKey,
+        size: normalizedSize
+    };
+}
+
 function renderWaitGroupsSection(waitGroupCounts = {}) {
-    const categories = [
-        { key: 'small', label: 'קבוצות של 1-3', emoji: '👥' },
-        { key: 'medium', label: 'קבוצות של 4-6', emoji: '👨‍👩‍👧' },
-        { key: 'large', label: 'קבוצות של 7+', emoji: '🎉' }
-    ];
+    const categories = Object.values(WAIT_GROUP_CATEGORY_METADATA);
 
     const normalized = (key) => {
         const data = waitGroupCounts?.[key] || {};
@@ -1922,7 +2047,7 @@ function renderWaitGroupsSection(waitGroupCounts = {}) {
     }
 
     const itemsHtml = categories
-        .map(({ key, label, emoji }, index) => {
+        .map(({ key, label, emoji, rangeLabel, accent }, index) => {
             const data = totals[index];
             const people = Math.round(data.people);
             const hasPeople = people > 0;
@@ -1931,10 +2056,11 @@ function renderWaitGroupsSection(waitGroupCounts = {}) {
                 ? `${data.groups} דיווחים`
                 : 'מחכים לעוד נתונים';
 
-            return `<div class="wait-groups__item">
+            return `<div class="wait-groups__item wait-groups__item--${key}" style="--wait-group-accent: ${escapeHtml(accent)}">
                 <span class="wait-groups__emoji" aria-hidden="true">${escapeHtml(emoji)}</span>
                 <div class="wait-groups__meta">
                     <p class="wait-groups__label">${escapeHtml(label)}</p>
+                    <span class="wait-groups__range wait-groups__range--${key}">${escapeHtml(rangeLabel)}</span>
                     <p class="wait-groups__value">${escapeHtml(primaryLabel)}</p>
                     <p class="wait-groups__sub">${escapeHtml(secondaryLabel)}</p>
                 </div>
@@ -1962,6 +2088,9 @@ function showLocationCard(name, id) {
         : "אין עדיין מידע";
 
     const stats = computeLocationStats(locationData.visits);
+    const latestVisit = Array.isArray(locationData.visits) && locationData.visits.length > 0
+        ? locationData.visits[0]
+        : null;
     const { dayIndex, hourIndex } = getCurrentTimeContext();
     const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
     const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
@@ -1976,6 +2105,7 @@ function showLocationCard(name, id) {
         maxLength: 240
     });
     const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
+    const waitSnapshotSection = renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts);
     const waitGroupsSection = renderWaitGroupsSection(stats.waitGroupCounts);
     const lastUpdateRaw = locationData?.visits?.[0]?.timestamp ?? locationData?.lastUpdatedAt ?? null;
     const lastUpdatedLabel = lastUpdateRaw
@@ -1994,6 +2124,7 @@ function showLocationCard(name, id) {
                 </button>
             </header>
             ${placeInfoHtml}
+            ${waitSnapshotSection}
             <div class="location-card__stat-grid">
                 <div class="location-card__stat location-card__stat--primary">
                     <p class="location-card__stat-label">ממוצע המתנה</p>
