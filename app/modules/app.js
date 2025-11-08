@@ -1121,9 +1121,6 @@ async function fetchViewportPlaces() {
 
     const query = buildOverpassPlacesQuery(fetchContext);
 
-    renderNearbyPanelPlaceholder('טוען מקומות באזור התצוגה הנוכחי...');
-    setNearbyPanelVisible(true);
-
     try {
         const response = await fetch('https://overpass-api.de/api/interpreter', {
             method: 'POST',
@@ -1315,8 +1312,6 @@ async function fetchGpsNearbyPlaces() {
     const signal = gpsPoiFetchAbortController.signal;
 
     isLoadingPois = true;
-    renderNearbyPanelPlaceholder('טוען מקומות בקרבתך...');
-    setNearbyPanelVisible(true);
     updateState();
 
     try {
@@ -1358,8 +1353,11 @@ async function fetchGpsNearbyPlaces() {
 
         gpsNearbyPlaces = prioritized;
         const hasRendered = renderNearbyLocationsPanel(fetchContext);
-        if (!hasRendered) {
+        if (hasRendered) {
+            setNearbyPanelVisible(true);
+        } else {
             renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך בטווח החיפוש.');
+            setNearbyPanelVisible(true);
         }
     } catch (error) {
         if (error?.name === 'AbortError') {
@@ -1368,6 +1366,7 @@ async function fetchGpsNearbyPlaces() {
         console.error('Failed to fetch GPS nearby places', error);
         gpsNearbyPlaces = [];
         renderNearbyPanelPlaceholder('לא הצלחנו לטעון מקומות בקרבתך. נסו שוב בעוד רגע.');
+        setNearbyPanelVisible(true);
     } finally {
         if (gpsPoiFetchAbortController?.signal === signal) {
             gpsPoiFetchAbortController = null;
@@ -2397,13 +2396,13 @@ function showLocationCard(name, id) {
                     </button>
                 </div>
             </header>
-            <div class="location-card__actions">
-                <button type="button" class="location-card__checkin-btn">צ'ק-אין למקום</button>
-            </div>
             ${placeInfoHtml}
             ${queueStatusSection}
             ${hourlyAverageHtml}
             ${intelSection}
+            <div class="location-card__actions">
+                <button type="button" class="location-card__checkin-btn">צ'ק-אין למקום</button>
+            </div>
         </section>
     `;
 
@@ -2690,7 +2689,6 @@ function updatePosition(position) {
 
     void fetchGpsNearbyPlaces();
     renderNearbyLocationsPanel();
-    setNearbyPanelVisible(true);
 
     // --- Logic for when check-in is ACTIVE ---
     if (checkInStartTime && targetCoords) {
