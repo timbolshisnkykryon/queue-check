@@ -45,6 +45,7 @@ export function createAppState() {
         poiPlaces: [],
         gpsNearbyPlaces: [],
         nearbyPanelVisible: false,
+        nearbyPanelCollapsed: false,
         confettiTimeoutId: null
     };
 }

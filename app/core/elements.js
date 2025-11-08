@@ -15,6 +15,7 @@ export function getElements() {
         searchSuggestionsList: document.getElementById('search-suggestions'),
         gpsStatusBtn: document.getElementById('gps-status-btn'),
         nearbyLocationsPanel: document.getElementById('nearby-locations-panel'),
+        nearbyPanelToggleBtn: document.getElementById('nearby-panel-toggle'),
         nearbyLocationsList: document.getElementById('nearby-locations-list'),
         allLocationsList: document.getElementById('all-locations-list'),
         waitingLocationName: document.getElementById('waiting-location-name'),
