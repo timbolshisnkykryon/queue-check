@@ -76,6 +76,7 @@ export function initializeApplication(context) {
         poiPlaces,
         gpsNearbyPlaces,
         nearbyPanelVisible,
+        nearbyPanelCollapsed,
         confettiTimeoutId
     } = state;
 
@@ -95,6 +96,7 @@ export function initializeApplication(context) {
         searchSuggestionsList,
         gpsStatusBtn,
         nearbyLocationsPanel,
+        nearbyPanelToggleBtn,
         nearbyLocationsList,
         allLocationsList,
         waitingLocationName,
@@ -150,6 +152,9 @@ export function initializeApplication(context) {
         'pub'
     ];
     const ALLOWED_POI_AMENITIES = new Set(ALLOWED_AMENITY_VALUES);
+    const NEARBY_PANEL_MOBILE_BREAKPOINT = '(max-width: 768px)';
+
+    let nearbyPanelMobileQuery = null;
 
     function updateState() {
         Object.assign(state, {
@@ -198,8 +203,102 @@ export function initializeApplication(context) {
             poiPlaces,
             gpsNearbyPlaces,
             nearbyPanelVisible,
+            nearbyPanelCollapsed,
             confettiTimeoutId
         });
+    }
+
+    function isNearbyPanelCollapsible() {
+        return Boolean(nearbyPanelMobileQuery?.matches);
+    }
+
+    function syncNearbyPanelCollapsedClass() {
+        if (!nearbyLocationsPanel) {
+            return;
+        }
+
+        if (nearbyPanelCollapsed && isNearbyPanelCollapsible()) {
+            nearbyLocationsPanel.classList.add('nearby-panel--collapsed');
+        } else {
+            nearbyLocationsPanel.classList.remove('nearby-panel--collapsed');
+        }
+    }
+
+    function updateNearbyPanelToggleState() {
+        if (!nearbyPanelToggleBtn) {
+            return;
+        }
+
+        const collapsible = isNearbyPanelCollapsible();
+
+        if (collapsible) {
+            nearbyPanelToggleBtn.removeAttribute('hidden');
+            nearbyPanelToggleBtn.tabIndex = 0;
+        } else {
+            nearbyPanelToggleBtn.setAttribute('hidden', '');
+            nearbyPanelToggleBtn.tabIndex = -1;
+        }
+
+        nearbyPanelToggleBtn.setAttribute('aria-expanded', String(!nearbyPanelCollapsed));
+        const label = nearbyPanelCollapsed
+            ? 'הצגת רשימת המקומות הקרובים'
+            : 'צמצום רשימת המקומות הקרובים';
+        nearbyPanelToggleBtn.setAttribute('aria-label', label);
+    }
+
+    function setNearbyPanelCollapsed(collapsed, { force = false, skipStateUpdate = false } = {}) {
+        if (!nearbyLocationsPanel) {
+            return;
+        }
+
+        const collapsible = isNearbyPanelCollapsible();
+        const shouldCollapse = force ? Boolean(collapsed) : Boolean(collapsible && collapsed);
+        const previousValue = nearbyPanelCollapsed;
+
+        nearbyPanelCollapsed = shouldCollapse;
+        syncNearbyPanelCollapsedClass();
+        updateNearbyPanelToggleState();
+
+        if (previousValue !== nearbyPanelCollapsed && !skipStateUpdate) {
+            updateState();
+        }
+    }
+
+    function handleNearbyPanelViewportChange(matches) {
+        if (!matches && nearbyPanelCollapsed) {
+            setNearbyPanelCollapsed(false, { force: true });
+            return;
+        }
+
+        syncNearbyPanelCollapsedClass();
+        updateNearbyPanelToggleState();
+    }
+
+    function setupNearbyPanelMediaQuery() {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            updateNearbyPanelToggleState();
+            syncNearbyPanelCollapsedClass();
+            return;
+        }
+
+        if (nearbyPanelMobileQuery) {
+            handleNearbyPanelViewportChange(nearbyPanelMobileQuery.matches);
+            return;
+        }
+
+        nearbyPanelMobileQuery = window.matchMedia(NEARBY_PANEL_MOBILE_BREAKPOINT);
+
+        const changeListener = (event) => {
+            handleNearbyPanelViewportChange(event.matches);
+        };
+
+        if (typeof nearbyPanelMobileQuery.addEventListener === 'function') {
+            nearbyPanelMobileQuery.addEventListener('change', changeListener);
+        } else if (typeof nearbyPanelMobileQuery.addListener === 'function') {
+            nearbyPanelMobileQuery.addListener(changeListener);
+        }
+
+        handleNearbyPanelViewportChange(nearbyPanelMobileQuery.matches);
     }
 
     const NOMINATIM_SEARCH_ENDPOINT = 'https://nominatim.openstreetmap.org/search';
@@ -814,6 +913,17 @@ if (targetDetailsCard) {
 // --- 0. Initialize App ---
 async function initApp() {
     initMap();
+
+    setupNearbyPanelMediaQuery();
+
+    if (nearbyPanelToggleBtn) {
+        nearbyPanelToggleBtn.addEventListener('click', () => {
+            if (!isNearbyPanelCollapsible()) {
+                return;
+            }
+            setNearbyPanelCollapsed(!nearbyPanelCollapsed);
+        });
+    }
 
     if (nearbyLocationsList) {
         renderNearbyPanelPlaceholder('ממתינים למיקום ה-GPS שלך כדי להציג מקומות קרובים.');
@@ -1467,6 +1577,9 @@ function setNearbyPanelVisible(visible) {
         }
     }
 
+    syncNearbyPanelCollapsedClass();
+    updateNearbyPanelToggleState();
+
     nearbyPanelVisible = shouldShow;
     updateState();
 }
@@ -1939,6 +2052,10 @@ function selectLocation(lat, lon, name, id = null, options = {}) {
     celebrateSelection();
     renderNearbyLocationsPanel();
     setNearbyPanelVisible(true);
+
+    if (isNearbyPanelCollapsible()) {
+        setNearbyPanelCollapsed(true, { skipStateUpdate: true });
+    }
 
     // Ensure map tab is active
     if (document.getElementById('tab-content-locations').classList.contains('active')) {

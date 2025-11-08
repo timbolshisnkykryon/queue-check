@@ -324,7 +324,17 @@
         .nearby-panel__header {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 0.6rem;
+            width: 100%;
+        }
+
+        .nearby-panel__heading {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex: 1;
+            min-width: 0;
         }
 
         .nearby-panel__pulse {
@@ -361,6 +371,7 @@
             font-size: 0.75rem;
             opacity: 0.75;
             margin: 0;
+            transition: opacity 180ms ease;
         }
 
         .nearby-panel__list {
@@ -373,6 +384,42 @@
             overflow-y: auto;
             overflow-x: hidden;
             scrollbar-width: thin;
+            transition: max-height 200ms ease, opacity 180ms ease;
+        }
+
+        .nearby-panel__toggle {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 2.25rem;
+            height: 2.25rem;
+            border-radius: 9999px;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            background: rgba(255, 255, 255, 0.12);
+            color: #f8fafc;
+            cursor: pointer;
+            transition: background 160ms ease, transform 160ms ease, border-color 160ms ease;
+        }
+
+        .nearby-panel__toggle:hover,
+        .nearby-panel__toggle:focus-visible {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+            border-color: rgba(148, 163, 184, 0.6);
+            outline: none;
+        }
+
+        .nearby-panel__toggle-icon {
+            width: 0.95rem;
+            height: 0.95rem;
+            border-right: 2px solid currentColor;
+            border-bottom: 2px solid currentColor;
+            transform: rotate(45deg);
+            transition: transform 200ms ease;
+        }
+
+        .nearby-panel--collapsed .nearby-panel__toggle-icon {
+            transform: rotate(-135deg);
         }
 
         .nearby-panel__list::-webkit-scrollbar {
@@ -1641,6 +1688,177 @@
             border-top-color: rgba(255, 255, 255, 0.95);
             animation: spin 0.8s linear infinite;
         }
+
+        @media (max-width: 768px) {
+            .main-header {
+                padding: 1rem 1.25rem;
+            }
+
+            .main-header__title {
+                font-size: 1.75rem;
+            }
+
+            #tab-navigation {
+                position: sticky;
+                top: 0;
+            }
+
+            .tab-btn {
+                padding: 0.75rem 0.5rem;
+                font-size: 0.95rem;
+            }
+
+            #tab-content-locations {
+                padding: 1rem;
+            }
+
+            .nearby-panel {
+                top: auto;
+                right: auto;
+                left: 50%;
+                bottom: calc(1rem + var(--safe-area-bottom));
+                transform: translate(-50%, 16px);
+                width: min(420px, calc(100vw - 1.5rem));
+                padding: 0.85rem 1rem 1.05rem;
+                max-height: min(65vh, 420px);
+                transition: opacity 220ms ease, transform 220ms ease, max-height 220ms ease;
+            }
+
+            .nearby-panel.active {
+                transform: translate(-50%, 0);
+            }
+
+            .nearby-panel__toggle {
+                display: inline-flex;
+            }
+
+            .nearby-panel__subtitle {
+                margin-top: 0.25rem;
+            }
+
+            .nearby-panel__list {
+                max-height: 320px;
+            }
+
+            .nearby-panel--collapsed {
+                max-height: 3.5rem;
+                overflow: hidden;
+                padding-bottom: 0.85rem;
+            }
+
+            .nearby-panel--collapsed .nearby-panel__subtitle,
+            .nearby-panel--collapsed .nearby-panel__list {
+                opacity: 0;
+                pointer-events: none;
+            }
+
+            .nearby-panel--collapsed .nearby-panel__list {
+                max-height: 0;
+            }
+
+            .location-card {
+                padding: 1.25rem 1.35rem;
+                border-radius: 1.3rem;
+                gap: 0.65rem;
+            }
+
+            .location-card__header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.75rem;
+            }
+
+            .location-card__header-actions {
+                align-self: stretch;
+                justify-content: space-between;
+            }
+
+            .location-card__title {
+                font-size: 1.2rem;
+            }
+
+            .location-card__subtitle {
+                font-size: 0.82rem;
+            }
+
+            .location-card__stat-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .location-card__stat {
+                padding: 0.95rem 1rem;
+            }
+
+            .location-card__hourly {
+                padding: 1rem 1.1rem;
+            }
+
+            #target-details-card {
+                right: 0.75rem;
+                left: 0.75rem;
+                width: auto;
+            }
+
+            #gps-status-btn {
+                font-size: 0.85rem;
+                padding: 0.65rem 0.75rem;
+            }
+
+            #waiting-screen {
+                padding: 1.5rem;
+            }
+
+            #waiting-screen h2 {
+                font-size: 1.9rem;
+            }
+
+            #waiting-screen #timer-display {
+                font-size: 3.5rem;
+            }
+
+            #waiting-screen .queue-status {
+                padding: 0.85rem 1rem 1rem;
+            }
+
+            #waiting-screen .queue-status__metric {
+                font-size: 1rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .nearby-panel {
+                width: min(380px, calc(100vw - 1.25rem));
+                padding: 0.75rem 0.9rem 0.95rem;
+            }
+
+            .nearby-panel--collapsed {
+                max-height: 3.25rem;
+            }
+
+            .location-card {
+                padding: 1.1rem 1.2rem;
+            }
+
+            .location-card__title {
+                font-size: 1.1rem;
+            }
+
+            .location-card__checkin-btn {
+                font-size: 0.95rem;
+            }
+
+            #waiting-screen {
+                padding: 1.25rem;
+            }
+
+            #waiting-screen #timer-display {
+                font-size: 3.25rem;
+            }
+
+            #waiting-screen .queue-status__metric {
+                font-size: 0.95rem;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col overflow-x-hidden">
@@ -1730,8 +1948,13 @@
                 <!-- Nearby Locations Panel -->
                 <aside id="nearby-locations-panel" class="nearby-panel hidden" aria-live="polite" aria-label="מקומות קרובים">
                     <div class="nearby-panel__header">
-                        <div class="nearby-panel__pulse" aria-hidden="true"></div>
-                        <h3 class="nearby-panel__title">מקומות קרובים אליך</h3>
+                        <div class="nearby-panel__heading">
+                            <div class="nearby-panel__pulse" aria-hidden="true"></div>
+                            <h3 class="nearby-panel__title">מקומות קרובים אליך</h3>
+                        </div>
+                        <button id="nearby-panel-toggle" class="nearby-panel__toggle" type="button" aria-expanded="true" aria-label="צמצום רשימת המקומות הקרובים">
+                            <span class="nearby-panel__toggle-icon" aria-hidden="true"></span>
+                        </button>
                     </div>
                     <p class="nearby-panel__subtitle">לחיצה על מקום תקפיץ אותך אליו במפה</p>
                     <ul id="nearby-locations-list" class="nearby-panel__list" role="list"></ul>
