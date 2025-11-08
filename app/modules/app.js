@@ -25,7 +25,8 @@ export function initializeApplication(context) {
         FIRESTORE_LOCATIONS_COLLECTION,
         HOURS_PER_DAY,
         DAY_NAMES_HE,
-        SHORT_DAY_NAMES_HE
+        SHORT_DAY_NAMES_HE,
+        NEARBY_PLACES_RADIUS_METERS
     } = constants;
     const firebaseConfig = context.firebaseConfig;
 
@@ -1073,39 +1074,27 @@ async function fetchNearbyPlaces() {
         poiFetchAbortController.abort();
     }
 
-    const bounds = map.getBounds();
-    if (!bounds) {
-        return;
-    }
+    const coords = lastKnownPosition?.coords;
+    const userLat = Number(coords?.latitude);
+    const userLon = Number(coords?.longitude);
 
-    const zoomLevel = map.getZoom();
-    if (!Number.isFinite(zoomLevel) || zoomLevel < 12) {
+    if (!Number.isFinite(userLat) || !Number.isFinite(userLon)) {
         if (poiLayer) {
             poiLayer.clearLayers();
         }
         lastPoiFetchBounds = null;
+        setNearbyPanelVisible(false);
         updateState();
         return;
     }
 
-    const south = bounds.getSouth();
-    const west = bounds.getWest();
-    const north = bounds.getNorth();
-    const east = bounds.getEast();
-
-    if (![south, west, north, east].every((coord) => Number.isFinite(coord))) {
-        return;
-    }
-
-    const boundsSummary = {
-        south: Number(south.toFixed(5)),
-        west: Number(west.toFixed(5)),
-        north: Number(north.toFixed(5)),
-        east: Number(east.toFixed(5)),
-        zoom: Number(zoomLevel.toFixed(2))
+    const fetchContext = {
+        lat: Number(userLat.toFixed(5)),
+        lon: Number(userLon.toFixed(5)),
+        radius: Number(NEARBY_PLACES_RADIUS_METERS)
     };
 
-    lastPoiFetchBounds = boundsSummary;
+    lastPoiFetchBounds = fetchContext;
 
     poiFetchAbortController = new AbortController();
     const signal = poiFetchAbortController.signal;
@@ -1113,7 +1102,7 @@ async function fetchNearbyPlaces() {
     isLoadingPois = true;
     updateState();
 
-    const query = buildOverpassPlacesQuery({ south, west, north, east });
+    const query = buildOverpassPlacesQuery(fetchContext);
 
     try {
         const response = await fetch('https://overpass-api.de/api/interpreter', {
@@ -1141,6 +1130,7 @@ async function fetchNearbyPlaces() {
             return;
         }
         console.error('Failed to fetch nearby places', error);
+        setNearbyPanelVisible(false);
     } finally {
         if (poiFetchAbortController?.signal === signal) {
             poiFetchAbortController = null;
@@ -1150,19 +1140,19 @@ async function fetchNearbyPlaces() {
     }
 }
 
-function buildOverpassPlacesQuery({ south, west, north, east }) {
-    const bbox = [south, west, north, east]
-        .map((coord) => coord.toFixed(6))
-        .join(',');
+function buildOverpassPlacesQuery({ lat, lon, radius }) {
+    const normalizedLat = Number(lat);
+    const normalizedLon = Number(lon);
+    const normalizedRadius = Math.min(Math.max(Number(radius) || 0, 50), 5000);
 
     return `
 [out:json][timeout:25];
 (
-  node["amenity"~"^(restaurant|cafe|bar)$"](${bbox});
-  way["amenity"~"^(restaurant|cafe|bar)$"](${bbox});
-  rel["amenity"~"^(restaurant|cafe|bar)$"](${bbox});
+  node["amenity"~"^(restaurant|cafe|bar)$"](around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)});
+  way["amenity"~"^(restaurant|cafe|bar)$"](around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)});
+  rel["amenity"~"^(restaurant|cafe|bar)$"](around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)});
 );
-out center 120;
+out center 60;
 `;
 }
 
@@ -1196,11 +1186,37 @@ function renderPointsOfInterest(elements) {
         }
     }
 
-    poiPlaces = places;
+    const coords = lastKnownPosition?.coords;
+    const userLat = Number(coords?.latitude);
+    const userLon = Number(coords?.longitude);
 
-    const topPlaces = places.slice(0, 160);
+    let prioritizedPlaces = places.slice(0, 60);
 
-    for (const place of topPlaces) {
+    if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+        prioritizedPlaces = places
+            .map((place) => {
+                if (!place || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) {
+                    return null;
+                }
+
+                const distance = calculateDistanceMeters(userLat, userLon, place.lat, place.lon);
+                if (!Number.isFinite(distance) || distance > NEARBY_PLACES_RADIUS_METERS) {
+                    return null;
+                }
+
+                return { place, distance };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.distance - b.distance)
+            .slice(0, 10)
+            .map(({ place }) => place);
+    } else {
+        prioritizedPlaces = prioritizedPlaces.slice(0, 10);
+    }
+
+    poiPlaces = prioritizedPlaces;
+
+    for (const place of poiPlaces) {
         const marker = L.marker([place.lat, place.lon], {
             icon: createPoiIcon(place)
         }).addTo(poiLayer);
@@ -1222,11 +1238,7 @@ function renderPointsOfInterest(elements) {
     }
 
     const hasNearby = updateNearbyLocationsPanel();
-    if (!lastKnownPosition) {
-        setNearbyPanelVisible(false);
-    } else {
-        setNearbyPanelVisible(hasNearby);
-    }
+    setNearbyPanelVisible(lastKnownPosition ? hasNearby : false);
 
     updateState();
 }
@@ -1262,7 +1274,7 @@ function updateNearbyLocationsPanel() {
             }
 
             const distance = calculateDistanceMeters(userLat, userLon, place.lat, place.lon);
-            if (!Number.isFinite(distance)) {
+            if (!Number.isFinite(distance) || distance > NEARBY_PLACES_RADIUS_METERS) {
                 return null;
             }
 
@@ -1817,36 +1829,44 @@ function renderSelectedPlaceInfoSection(placeInfo) {
 
     const emoji = placeInfo?.category?.emoji || '📍';
     const categoryLabel = placeInfo?.category?.label || 'נקודת עניין בסביבה';
-    const addressHtml = Array.isArray(placeInfo.addressLines) && placeInfo.addressLines.length > 0
-        ? `<div class="mt-3">
-                <h4 class="text-xs font-semibold text-blue-900 uppercase tracking-wide mb-1">כתובת</h4>
-                <p class="text-sm text-blue-900/90 leading-snug">${escapeHtml(placeInfo.addressLines.join(', '))}</p>
-            </div>`
+    const addressLine = Array.isArray(placeInfo.addressLines) && placeInfo.addressLines.length > 0
+        ? placeInfo.addressLines.join(', ')
         : '';
 
-    const detailItems = [];
+    const detailEntries = [];
+    const normalizeLabel = (label) => typeof label === 'string'
+        ? label.replace(/[:：]\s*$/, '').trim()
+        : '';
+
     if (Array.isArray(placeInfo.infoLines)) {
         for (const info of placeInfo.infoLines) {
             if (info?.label && info?.value) {
-                detailItems.push(`<li><span class="font-semibold">${escapeHtml(info.label)}:</span> ${escapeHtml(info.value)}</li>`);
+                const normalizedLabel = normalizeLabel(info.label);
+                detailEntries.push({ label: normalizedLabel, value: info.value });
             }
         }
     }
 
-    const openingHours = placeInfo.openingHours && !detailItems.some((item) => item.includes('שעות פתיחה'))
-        ? `<li><span class="font-semibold">שעות פתיחה:</span> ${escapeHtml(placeInfo.openingHours)}</li>`
-        : '';
-
-    if (openingHours) {
-        detailItems.push(openingHours);
+    const hasOpeningHours = detailEntries.some((entry) => entry.label === 'שעות פתיחה');
+    if (placeInfo.openingHours && !hasOpeningHours) {
+        detailEntries.push({ label: 'שעות פתיחה', value: placeInfo.openingHours });
     }
 
-    if (placeInfo.phone) {
-        detailItems.push(`<li><span class="font-semibold">טלפון:</span> ${escapeHtml(placeInfo.phone)}</li>`);
+    if (placeInfo.phone && !detailEntries.some((entry) => entry.label === 'טלפון')) {
+        detailEntries.push({ label: 'טלפון', value: placeInfo.phone });
     }
 
-    const detailsHtml = detailItems.length > 0
-        ? `<ul class="mt-3 space-y-1 text-sm text-blue-900/90">${detailItems.join('')}</ul>`
+    const detailsHtml = detailEntries.length > 0
+        ? `<div class="location-card__meta-grid">
+                ${detailEntries
+                    .map(({ label, value }) => `
+                        <div class="location-card__meta-item">
+                            <span class="location-card__meta-item-label">${escapeHtml(label)}:</span>
+                            <span class="location-card__meta-item-value">${escapeHtml(value)}</span>
+                        </div>
+                    `)
+                    .join('')}
+            </div>`
         : '';
 
     let websiteHtml = '';
@@ -1855,22 +1875,22 @@ function renderSelectedPlaceInfoSection(placeInfo) {
         : placeInfo.website || '';
     const displayWebsite = rawWebsiteLabel.replace(/^https?:\/\//, '');
     if (placeInfo.website) {
-        websiteHtml = `<div class="mt-3 text-sm"><span class="font-semibold text-blue-900">אתר:</span> <a href="${escapeHtml(placeInfo.website)}" target="_blank" rel="noopener" class="text-blue-700 underline">${escapeHtml(displayWebsite)}</a></div>`;
+        websiteHtml = `<a class="location-card__meta-link" href="${escapeHtml(placeInfo.website)}" target="_blank" rel="noopener">${escapeHtml(displayWebsite)}</a>`;
     } else if (displayWebsite) {
-        websiteHtml = `<div class="mt-3 text-sm"><span class="font-semibold text-blue-900">אתר:</span> ${escapeHtml(displayWebsite)}</div>`;
+        websiteHtml = `<div class="location-card__meta-link location-card__meta-link--inactive">${escapeHtml(displayWebsite)}</div>`;
     }
 
     return `
-        <div class="selected-place-info bg-blue-50 border border-blue-100 rounded-lg p-4 mb-4">
-            <div class="flex items-center gap-3">
-                <div class="selected-place-info__icon" aria-hidden="true">${escapeHtml(emoji)}</div>
-                <p class="text-sm font-semibold text-blue-900">${escapeHtml(categoryLabel)}</p>
+        <section class="location-card__meta" aria-label="מידע על המקום הנבחר">
+            <div class="location-card__meta-icon" aria-hidden="true">${escapeHtml(emoji)}</div>
+            <div class="location-card__meta-body">
+                <p class="location-card__meta-category">${escapeHtml(categoryLabel)}</p>
+                ${addressLine ? `<p class="location-card__meta-address">${escapeHtml(addressLine)}</p>` : ''}
+                ${detailsHtml}
+                ${websiteHtml}
+                <p class="location-card__meta-hint">לחצו על "התחל צ'ק-אין" כדי לשתף את זמן ההמתנה שלכם במקום זה.</p>
             </div>
-            ${addressHtml}
-            ${detailsHtml}
-            ${websiteHtml}
-            <p class="mt-3 text-[0.7rem] text-blue-800/60">לחצו על "התחל צ'ק-אין" כדי לשתף את זמן ההמתנה שלכם במקום זה.</p>
-        </div>
+        </section>
     `;
 }
 
@@ -1973,6 +1993,7 @@ function showLocationCard(name, id) {
                     <span aria-hidden="true">✕</span>
                 </button>
             </header>
+            ${placeInfoHtml}
             <div class="location-card__stat-grid">
                 <div class="location-card__stat location-card__stat--primary">
                     <p class="location-card__stat-label">ממוצע המתנה</p>
@@ -1984,14 +2005,8 @@ function showLocationCard(name, id) {
                     <p class="location-card__stat-value location-card__stat-value--secondary">${currentHourStats.label}</p>
                     <p class="location-card__stat-hint">${escapeHtml(currentMomentLabel)}</p>
                 </div>
-                <div class="location-card__stat">
-                    <p class="location-card__stat-label">סה"כ צ'ק-אינים</p>
-                    <p class="location-card__stat-value location-card__stat-value--accent">${locationData.totalCheckIns}</p>
-                    <p class="location-card__stat-hint">נאסף מקהילת תפוס מקום</p>
-                </div>
             </div>
             ${waitGroupsSection}
-            ${placeInfoHtml}
             ${hasIntel ? `
                 <section class="location-card__intel">
                     <div class="location-card__intel-header">
@@ -2278,6 +2293,8 @@ function updatePosition(position) {
     } else {
         userMarker.setLatLng(userLatLng);
     }
+
+    scheduleNearbyPlacesRefresh({ immediate: true });
 
     const hasNearby = updateNearbyLocationsPanel();
     setNearbyPanelVisible(hasNearby);
