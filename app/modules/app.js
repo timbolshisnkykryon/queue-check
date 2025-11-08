@@ -1098,31 +1098,10 @@ async function fetchNearbyPlaces() {
         return;
     }
 
-    let boundingBox = null;
-    if (map && typeof map.getBounds === 'function') {
-        const bounds = map.getBounds();
-        if (bounds) {
-            const south = Number(bounds.getSouth());
-            const west = Number(bounds.getWest());
-            const north = Number(bounds.getNorth());
-            const east = Number(bounds.getEast());
-
-            if ([south, west, north, east].every((value) => Number.isFinite(value))) {
-                boundingBox = {
-                    south: Number(south.toFixed(5)),
-                    west: Number(west.toFixed(5)),
-                    north: Number(north.toFixed(5)),
-                    east: Number(east.toFixed(5))
-                };
-            }
-        }
-    }
-
     const fetchContext = {
         lat: Number(userLat.toFixed(5)),
         lon: Number(userLon.toFixed(5)),
-        radius: Number(NEARBY_PLACES_RADIUS_METERS),
-        bbox: boundingBox
+        radius: Number(NEARBY_PLACES_RADIUS_METERS)
     };
 
     lastPoiFetchBounds = fetchContext;
@@ -1171,7 +1150,7 @@ async function fetchNearbyPlaces() {
     }
 }
 
-function buildOverpassPlacesQuery({ lat, lon, radius, bbox }) {
+function buildOverpassPlacesQuery({ lat, lon, radius }) {
     const normalizedLat = Number(lat);
     const normalizedLon = Number(lon);
     const normalizedRadius = Math.min(Math.max(Number(radius) || 0, 50), 5000);
@@ -1179,20 +1158,11 @@ function buildOverpassPlacesQuery({ lat, lon, radius, bbox }) {
         .map((value) => value.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
         .join('|');
 
-    let areaSelector = '';
-    if (
-        bbox
-        && Number.isFinite(bbox.south)
-        && Number.isFinite(bbox.west)
-        && Number.isFinite(bbox.north)
-        && Number.isFinite(bbox.east)
-    ) {
-        areaSelector = `(${bbox.south.toFixed(6)},${bbox.west.toFixed(6)},${bbox.north.toFixed(6)},${bbox.east.toFixed(6)})`;
-    } else if (Number.isFinite(normalizedLat) && Number.isFinite(normalizedLon)) {
-        areaSelector = `(around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)})`;
-    } else {
+    if (!Number.isFinite(normalizedLat) || !Number.isFinite(normalizedLon)) {
         throw new Error('Invalid parameters for Overpass query');
     }
+
+    const areaSelector = `(around:${normalizedRadius},${normalizedLat.toFixed(6)},${normalizedLon.toFixed(6)})`;
 
     return `
 [out:json][timeout:25];
