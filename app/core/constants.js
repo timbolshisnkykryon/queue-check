@@ -31,3 +31,5 @@ export const RADIUS_STYLES = {
         fillOpacity: 0.35
     }
 };
+
+export const NEARBY_PLACES_RADIUS_METERS = 1200;
