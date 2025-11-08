@@ -14,6 +14,8 @@ export function getElements() {
         locationNameInput: document.getElementById('location-name-input'),
         searchSuggestionsList: document.getElementById('search-suggestions'),
         gpsStatusBtn: document.getElementById('gps-status-btn'),
+        nearbyLocationsPanel: document.getElementById('nearby-locations-panel'),
+        nearbyLocationsList: document.getElementById('nearby-locations-list'),
         allLocationsList: document.getElementById('all-locations-list'),
         waitingLocationName: document.getElementById('waiting-location-name'),
         timerDisplay: document.getElementById('timer-display'),
@@ -47,7 +49,8 @@ export function getElements() {
         renameLocationSaveBtn: document.getElementById('rename-location-save-btn'),
         renameLocationCloseBtn: document.getElementById('rename-location-close-btn'),
         tabContainers: Array.from(document.querySelectorAll('.tab-content')),
-        tabButtons: Array.from(document.querySelectorAll('.tab-btn'))
+        tabButtons: Array.from(document.querySelectorAll('.tab-btn')),
+        confettiRoot: document.getElementById('confetti-root')
     };
 
     if (elements.targetDetailsCard) {

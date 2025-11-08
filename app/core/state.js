@@ -39,6 +39,9 @@ export function createAppState() {
         firestoreDb: null,
         unsubscribeLocations: null,
         locationsLoaded: false,
-        firebaseInitializationError: null
+        firebaseInitializationError: null,
+        poiPlaces: [],
+        nearbyPanelVisible: false,
+        confettiTimeoutId: null
     };
 }

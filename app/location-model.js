@@ -100,6 +100,22 @@ export function normalizeVisitEntry(entry, { now = new Date() } = {}) {
         return null;
     }
 
+    const partyCandidates = [
+        visit.partySize,
+        visit.groupSize,
+        visit.peopleCount,
+        visit.people,
+        visit.size
+    ];
+    let partySize = null;
+    for (const candidate of partyCandidates) {
+        const numeric = Number(candidate);
+        if (Number.isFinite(numeric) && numeric > 0) {
+            partySize = numeric;
+            break;
+        }
+    }
+
     if (!Number.isInteger(visit.dayOfWeek) || visit.dayOfWeek < 0 || visit.dayOfWeek > 6) {
         const derivedDate = new Date(visit.timestamp);
         visit.dayOfWeek = derivedDate.getDay();
@@ -113,6 +129,7 @@ export function normalizeVisitEntry(entry, { now = new Date() } = {}) {
     return {
         timestamp: visit.timestamp,
         waitSeconds,
+        partySize,
         dayOfWeek: visit.dayOfWeek,
         hourOfDay: visit.hourOfDay
     };

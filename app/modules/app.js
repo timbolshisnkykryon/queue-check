@@ -69,7 +69,10 @@ export function initializeApplication(context) {
         firestoreDb,
         unsubscribeLocations,
         locationsLoaded,
-        firebaseInitializationError
+        firebaseInitializationError,
+        poiPlaces,
+        nearbyPanelVisible,
+        confettiTimeoutId
     } = state;
 
     const {
@@ -87,6 +90,8 @@ export function initializeApplication(context) {
         locationNameInput,
         searchSuggestionsList,
         gpsStatusBtn,
+        nearbyLocationsPanel,
+        nearbyLocationsList,
         allLocationsList,
         waitingLocationName,
         timerDisplay,
@@ -120,7 +125,8 @@ export function initializeApplication(context) {
         renameLocationSaveBtn,
         renameLocationCloseBtn,
         tabContainers,
-        tabButtons
+        tabButtons,
+        confettiRoot
     } = elements;
 
     if (gpsCountdownEl) {
@@ -172,7 +178,10 @@ export function initializeApplication(context) {
             firestoreDb,
             unsubscribeLocations,
             locationsLoaded,
-            firebaseInitializationError
+            firebaseInitializationError,
+            poiPlaces,
+            nearbyPanelVisible,
+            confettiTimeoutId
         });
     }
 
@@ -796,7 +805,9 @@ async function initApp() {
     });
 
     // Event Listeners
-    searchBtn.addEventListener('click', () => { void handleSearchLocation(); });
+    if (searchBtn) {
+        searchBtn.addEventListener('click', () => { void handleSearchLocation(); });
+    }
     if (locationNameInput) {
         locationNameInput.addEventListener('input', handleLocationInputChange);
         locationNameInput.addEventListener('keydown', handleLocationInputKeyDown);
@@ -804,6 +815,11 @@ async function initApp() {
     if (searchSuggestionsList) {
         searchSuggestionsList.addEventListener('pointerdown', (event) => event.preventDefault());
         searchSuggestionsList.addEventListener('click', handleSearchSuggestionListClick);
+    }
+
+    if (nearbyLocationsList) {
+        nearbyLocationsList.addEventListener('click', handleNearbyListClick);
+        nearbyLocationsList.addEventListener('keydown', handleNearbyListKeyDown);
     }
 
     cancelCheckInBtn.addEventListener('click', () => { void finishCheckIn(false); }); // Don't save
@@ -1006,15 +1022,6 @@ function initMap() {
     // Add zoom control to bottom-right
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // Set target on map click
-    map.on('click', (e) => {
-        const { lat, lng } = e.latlng;
-        targetName = `מיקום (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
-        locationNameInput.value = targetName;
-        clearSearchSuggestions({ abort: true, resetQuery: false });
-        selectLocation(lat, lng, targetName);
-    });
-
     renderVisitedLocationsOnMap();
 
     scheduleNearbyPlacesRefresh({ immediate: true });
@@ -1189,7 +1196,11 @@ function renderPointsOfInterest(elements) {
         }
     }
 
-    for (const place of places.slice(0, 160)) {
+    poiPlaces = places;
+
+    const topPlaces = places.slice(0, 160);
+
+    for (const place of topPlaces) {
         const marker = L.marker([place.lat, place.lon], {
             icon: createPoiIcon(place)
         }).addTo(poiLayer);
@@ -1209,6 +1220,230 @@ function renderPointsOfInterest(elements) {
             selectLocation(place.lat, place.lon, place.displayName, locationId, { placeInfo: place });
         });
     }
+
+    const hasNearby = updateNearbyLocationsPanel();
+    if (!lastKnownPosition) {
+        setNearbyPanelVisible(false);
+    } else {
+        setNearbyPanelVisible(hasNearby);
+    }
+
+    updateState();
+}
+
+function updateNearbyLocationsPanel() {
+    if (!nearbyLocationsPanel || !nearbyLocationsList) {
+        return false;
+    }
+
+    if (!Array.isArray(poiPlaces) || poiPlaces.length === 0) {
+        nearbyLocationsList.innerHTML = '';
+        return false;
+    }
+
+    const coords = lastKnownPosition?.coords;
+    if (!coords) {
+        nearbyLocationsList.innerHTML = '';
+        return false;
+    }
+
+    const userLat = Number(coords.latitude);
+    const userLon = Number(coords.longitude);
+
+    if (!Number.isFinite(userLat) || !Number.isFinite(userLon)) {
+        nearbyLocationsList.innerHTML = '';
+        return false;
+    }
+
+    const sorted = poiPlaces
+        .map((place) => {
+            if (!place || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) {
+                return null;
+            }
+
+            const distance = calculateDistanceMeters(userLat, userLon, place.lat, place.lon);
+            if (!Number.isFinite(distance)) {
+                return null;
+            }
+
+            return { place, distance };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 10);
+
+    if (sorted.length === 0) {
+        nearbyLocationsList.innerHTML = '';
+        return false;
+    }
+
+    const itemsHtml = sorted
+        .map(({ place, distance }) => {
+            const emoji = place?.category?.emoji || '📍';
+            const distanceLabel = escapeHtml(formatDistanceLabel(distance));
+            const locationId = escapeHtml(place.uid || `poi_${place.sourceType}_${place.id}`);
+            const isActive = targetCoords
+                && Math.abs(targetCoords.lat - place.lat) < 0.0001
+                && Math.abs(targetCoords.lon - place.lon) < 0.0001;
+            const activeClass = isActive ? ' nearby-panel__item--active' : '';
+
+            return `<li class="nearby-panel__item${activeClass}" role="button" tabindex="0" data-location-id="${locationId}" aria-label="${escapeHtml(place.displayName)} (${distanceLabel})">
+                <span class="nearby-panel__emoji" aria-hidden="true">${escapeHtml(emoji)}</span>
+                <div class="nearby-panel__name">${escapeHtml(place.displayName)}</div>
+                <span class="nearby-panel__distance">${distanceLabel}</span>
+            </li>`;
+        })
+        .join('');
+
+    nearbyLocationsList.innerHTML = itemsHtml;
+    return true;
+}
+
+function setNearbyPanelVisible(visible) {
+    if (!nearbyLocationsPanel) {
+        return;
+    }
+
+    const shouldShow = Boolean(visible);
+    if (shouldShow === nearbyPanelVisible) {
+        return;
+    }
+
+    if (shouldShow) {
+        nearbyLocationsPanel.classList.remove('hidden');
+        requestAnimationFrame(() => {
+            nearbyLocationsPanel.classList.add('active');
+        });
+    } else {
+        nearbyLocationsPanel.classList.remove('active');
+        const handleTransitionEnd = (event) => {
+            if (event.propertyName === 'opacity') {
+                nearbyLocationsPanel.classList.add('hidden');
+            }
+        };
+        nearbyLocationsPanel.addEventListener('transitionend', handleTransitionEnd, { once: true });
+        if (!nearbyLocationsPanel.classList.contains('active')) {
+            nearbyLocationsPanel.classList.add('hidden');
+        }
+    }
+
+    nearbyPanelVisible = shouldShow;
+    updateState();
+}
+
+function handleNearbyListClick(event) {
+    const item = event.target.closest('[data-location-id]');
+    if (!item) {
+        return;
+    }
+
+    event.preventDefault();
+    activateNearbyItem(item.dataset.locationId);
+}
+
+function handleNearbyListKeyDown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+    }
+
+    const item = event.target.closest('[data-location-id]');
+    if (!item) {
+        return;
+    }
+
+    event.preventDefault();
+    activateNearbyItem(item.dataset.locationId);
+}
+
+function activateNearbyItem(locationId) {
+    if (!locationId) {
+        return;
+    }
+
+    const place = getPoiPlaceByUid(locationId);
+    if (!place) {
+        return;
+    }
+
+    const effectiveId = place.uid || `poi_${place.sourceType}_${place.id}`;
+    selectLocation(place.lat, place.lon, place.displayName, effectiveId, { placeInfo: place });
+    updateNearbyLocationsPanel();
+}
+
+function getPoiPlaceByUid(uid) {
+    if (!uid || !Array.isArray(poiPlaces)) {
+        return null;
+    }
+
+    return poiPlaces.find((place) => (place?.uid || `poi_${place?.sourceType}_${place?.id}`) === uid) || null;
+}
+
+function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+    if (map && typeof map.distance === 'function') {
+        return map.distance([lat1, lon1], [lat2, lon2]);
+    }
+
+    const toRad = (value) => (value * Math.PI) / 180;
+    const R = 6371000;
+    const φ1 = toRad(lat1);
+    const φ2 = toRad(lat2);
+    const Δφ = toRad(lat2 - lat1);
+    const Δλ = toRad(lon2 - lon1);
+
+    const a = Math.sin(Δφ / 2) ** 2
+        + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
+function formatDistanceLabel(distanceMeters) {
+    if (!Number.isFinite(distanceMeters)) {
+        return '---';
+    }
+
+    if (distanceMeters < 1000) {
+        return `${Math.max(1, Math.round(distanceMeters))} מטר`;
+    }
+
+    const kilometers = distanceMeters / 1000;
+    return `${kilometers.toFixed(2)} ק"מ`;
+}
+
+function celebrateSelection() {
+    if (!confettiRoot) {
+        return;
+    }
+
+    const colors = ['#38bdf8', '#818cf8', '#facc15', '#f97316', '#34d399'];
+    const pieces = 28;
+    const fragment = document.createDocumentFragment();
+
+    for (let index = 0; index < pieces; index += 1) {
+        const piece = document.createElement('span');
+        piece.className = 'confetti-piece';
+        piece.style.background = colors[index % colors.length];
+        piece.style.left = `${Math.random() * 100}%`;
+        piece.style.setProperty('--x-start', `${(Math.random() * 40 - 20).toFixed(2)}vw`);
+        piece.style.setProperty('--x-end', `${(Math.random() * 60 - 30).toFixed(2)}vw`);
+        piece.style.animationDuration = `${(1.6 + Math.random() * 0.9).toFixed(2)}s`;
+        piece.style.animationDelay = `${(Math.random() * 0.15).toFixed(2)}s`;
+        fragment.appendChild(piece);
+        window.setTimeout(() => piece.remove(), 2800);
+    }
+
+    confettiRoot.appendChild(fragment);
+
+    if (confettiTimeoutId) {
+        clearTimeout(confettiTimeoutId);
+    }
+
+    confettiTimeoutId = window.setTimeout(() => {
+        while (confettiRoot.firstChild) {
+            confettiRoot.removeChild(confettiRoot.firstChild);
+        }
+        confettiTimeoutId = null;
+        updateState();
+    }, 3000);
 
     updateState();
 }
@@ -1240,9 +1475,13 @@ function normalizeOverpassElement(element) {
     const websiteRaw = extractFirstTagValue(tags, ['website', 'contact:website', 'url']);
     const website = sanitizeUrl(websiteRaw);
 
+    const sourceType = element.type || 'node';
+    const uid = `poi_${sourceType}_${element.id}`;
+
     return {
         id: element.id,
-        sourceType: element.type || 'node',
+        sourceType,
+        uid,
         lat,
         lon,
         name: rawName,
@@ -1464,6 +1703,10 @@ function createPoiIcon(place) {
 }
 
 async function handleSearchLocation() {
+    if (!searchBtn) {
+        return;
+    }
+
     const query = typeof locationNameInput?.value === 'string' ? locationNameInput.value.trim() : '';
     if (!query) {
         return;
@@ -1545,6 +1788,12 @@ function selectLocation(lat, lon, name, id = null, options = {}) {
     // Show location details card
     showLocationCard(name, currentLocationId);
 
+    celebrateSelection();
+    const hasNearby = updateNearbyLocationsPanel();
+    if (lastKnownPosition) {
+        setNearbyPanelVisible(hasNearby);
+    }
+
     // Ensure map tab is active
     if (document.getElementById('tab-content-locations').classList.contains('active')) {
         switchTab('map');
@@ -1625,6 +1874,65 @@ function renderSelectedPlaceInfoSection(placeInfo) {
     `;
 }
 
+function renderWaitGroupsSection(waitGroupCounts = {}) {
+    const categories = [
+        { key: 'small', label: 'קבוצות של 1-3', emoji: '👥' },
+        { key: 'medium', label: 'קבוצות של 4-6', emoji: '👨‍👩‍👧' },
+        { key: 'large', label: 'קבוצות של 7+', emoji: '🎉' }
+    ];
+
+    const normalized = (key) => {
+        const data = waitGroupCounts?.[key] || {};
+        return {
+            groups: Number.isFinite(Number(data.groups)) ? Number(data.groups) : 0,
+            people: Number.isFinite(Number(data.people)) ? Number(data.people) : 0
+        };
+    };
+
+    const totals = categories.map(({ key }) => normalized(key));
+    const totalReports = totals.reduce((sum, entry) => sum + entry.groups, 0);
+
+    if (totalReports === 0) {
+        return `
+            <section class="wait-groups wait-groups--empty">
+                <h4 class="wait-groups__title">עוד אין נתונים על גודל התור</h4>
+                <p class="wait-groups__hint">שתפו צ'ק-אין כדי לעזור לחברים לדעת כמה אנשים ממתינים.</p>
+            </section>
+        `;
+    }
+
+    const itemsHtml = categories
+        .map(({ key, label, emoji }, index) => {
+            const data = totals[index];
+            const people = Math.round(data.people);
+            const hasPeople = people > 0;
+            const primaryLabel = hasPeople ? `${people} אנשים` : `${data.groups} דיווחים`;
+            const secondaryLabel = hasPeople
+                ? `${data.groups} דיווחים`
+                : 'מחכים לעוד נתונים';
+
+            return `<div class="wait-groups__item">
+                <span class="wait-groups__emoji" aria-hidden="true">${escapeHtml(emoji)}</span>
+                <div class="wait-groups__meta">
+                    <p class="wait-groups__label">${escapeHtml(label)}</p>
+                    <p class="wait-groups__value">${escapeHtml(primaryLabel)}</p>
+                    <p class="wait-groups__sub">${escapeHtml(secondaryLabel)}</p>
+                </div>
+            </div>`;
+        })
+        .join('');
+
+    return `
+        <section class="wait-groups">
+            <h4 class="wait-groups__title">כמות האנשים שממתינים לפי קבוצות</h4>
+            <div class="wait-groups__grid">
+                ${itemsHtml}
+            </div>
+            <p class="wait-groups__hint">מבוסס על ${totalReports} צ'ק-אינים אחרונים שנאספו במקום.</p>
+        </section>
+    `;
+}
+
 function showLocationCard(name, id) {
     if (!targetDetailsCard) return;
     const locationData = getLocationFromCache(id) || { id, name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords), intel: null };
@@ -1636,108 +1944,79 @@ function showLocationCard(name, id) {
     const stats = computeLocationStats(locationData.visits);
     const { dayIndex, hourIndex } = getCurrentTimeContext();
     const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
-    const todaysAverageSeconds = computeDailyAverageWaitSeconds(todaysHourly);
-    const todaysAverageDisplay = formatDurationWithUnits(todaysAverageSeconds);
     const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
-    const hourlyChartHtml = renderHourlyChart(todaysHourly, hourIndex, {
-        variant: 'app',
-        emptyMessage: 'אין עדיין נתונים לשעות היום במיקום זה.'
-    });
-    const weeklyHasData = Array.isArray(stats.weeklyAverages)
-        && stats.weeklyAverages.some((value) => Number.isFinite(value) && value > 0);
-    const weeklySummaryPreviewHtml = weeklyHasData
-        ? renderWeeklySummary(stats.weeklyAverages, dayIndex, {
-            variant: 'app',
-            emptyMessage: 'אין עדיין נתונים שבועיים עבור מיקום זה.',
-            compact: true
-        })
-        : '';
-    const weeklySummaryExpandedHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
-        variant: 'app',
-        emptyMessage: 'אין עדיין נתונים שבועיים עבור מיקום זה.'
-    });
+    const currentDayLabel = DAY_NAMES_HE[dayIndex];
+    const currentMomentLabel = `${currentDayLabel} · ${formatHourLabel(hourIndex)}`;
 
     const hasIntel = hasIntelData(locationData.intel);
     const intelPreviewHtml = renderIntelPreviewHtml(locationData.intel, {
-        emptyMessage: 'היו הראשונים לקבל סקירה למיקום זה באמצעות Gemini כאשר תבצעו צ\'ק-אין.',
-        textClass: 'text-xs text-gray-500 mt-2',
+        emptyMessage: 'טרם נאספו תובנות למיקום זה. בצעו צ\'ק-אין ראשון כדי לקבל סקירה חכמה.',
+        textClass: 'text-sm text-blue-900/90 leading-relaxed',
         summaryClass: 'text-sm text-blue-900/90 leading-relaxed',
-        maxLength: 220
+        maxLength: 240
     });
     const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
+    const waitGroupsSection = renderWaitGroupsSection(stats.waitGroupCounts);
+    const lastUpdateRaw = locationData?.visits?.[0]?.timestamp ?? locationData?.lastUpdatedAt ?? null;
+    const lastUpdatedLabel = lastUpdateRaw
+        ? `עודכן לאחרונה: ${formatTimestamp(lastUpdateRaw)}`
+        : 'טרם נאספו נתוני המתנה כאן';
 
     targetDetailsCard.innerHTML = `
-        <div class="flex items-start justify-between gap-3 mb-2">
-            <h3 class="font-bold text-lg text-gray-900">${name}</h3>
-            <button id="close-location-card-btn" type="button" class="w-8 h-8 flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-lg font-semibold leading-none hover:bg-blue-200 transition" aria-label="סגירת חלון מידע" title="סגירה">
-                ×
-            </button>
-        </div>
-        ${placeInfoHtml}
-        <div class="bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500 text-white rounded-xl p-4 mb-4 shadow-sm">
-            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <section class="location-card" aria-label="פרטי המקום ${escapeHtml(name)}">
+            <header class="location-card__header">
                 <div>
-                    <p class="text-xs uppercase tracking-wide text-blue-100">ממוצע ההמתנה היום</p>
-                    <p class="text-2xl font-bold">${todaysAverageDisplay}</p>
+                    <h3 class="location-card__title">${escapeHtml(name)}</h3>
+                    <p class="location-card__subtitle">${escapeHtml(lastUpdatedLabel)}</p>
                 </div>
-                <div class="sm:text-right">
-                    <p class="text-xs uppercase tracking-wide text-blue-100">מצב נוכחי</p>
-                    <p class="text-xs text-blue-100/80 mb-1">${DAY_NAMES_HE[dayIndex]} · ${formatHourLabel(hourIndex)}</p>
-                    <p class="text-lg font-semibold">${currentHourStats.label}</p>
+                <button id="close-location-card-btn" type="button" class="location-card__close" aria-label="סגירת חלון מידע">
+                    <span aria-hidden="true">✕</span>
+                </button>
+            </header>
+            <div class="location-card__stat-grid">
+                <div class="location-card__stat location-card__stat--primary">
+                    <p class="location-card__stat-label">ממוצע המתנה</p>
+                    <p class="location-card__stat-value">${overallAverageDisplay}</p>
+                    <p class="location-card__stat-hint">${locationData.totalCheckIns > 0 ? `מבוסס על ${locationData.totalCheckIns} צ'ק-אינים אחרונים` : 'היו הראשונים לשתף המתנה!'}</p>
+                </div>
+                <div class="location-card__stat">
+                    <p class="location-card__stat-label">מצב כרגע</p>
+                    <p class="location-card__stat-value location-card__stat-value--secondary">${currentHourStats.label}</p>
+                    <p class="location-card__stat-hint">${escapeHtml(currentMomentLabel)}</p>
+                </div>
+                <div class="location-card__stat">
+                    <p class="location-card__stat-label">סה"כ צ'ק-אינים</p>
+                    <p class="location-card__stat-value location-card__stat-value--accent">${locationData.totalCheckIns}</p>
+                    <p class="location-card__stat-hint">נאסף מקהילת תפוס מקום</p>
                 </div>
             </div>
-        </div>
-        <details class="bg-white border border-gray-200 rounded-lg p-3 mb-4" data-testid="location-stats-toggle">
-            <summary class="flex items-center justify-between gap-2 cursor-pointer text-sm font-semibold text-gray-700">
-                <span>סטטיסטיקות</span>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-gray-500 transition-transform details-arrow">
-                    <path fill-rule="evenodd" d="M12 16a1 1 0 0 1-.707-.293l-5-5a1 1 0 1 1 1.414-1.414L12 13.586l4.293-4.293a1 1 0 1 1 1.414 1.414l-5 5A1 1 0 0 1 12 16Z" clip-rule="evenodd" />
-                </svg>
-            </summary>
-            <div class="mt-3 flex flex-col gap-4 text-sm text-gray-600 leading-relaxed">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
-                        <div class="font-semibold text-gray-700">ממוצע כללי</div>
-                        <div class="text-blue-600 font-semibold">${overallAverageDisplay}</div>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg p-3 text-gray-600">
-                        <div class="font-semibold text-gray-700">סה"כ צ'ק-אינים</div>
-                        <div class="text-blue-600 font-semibold">${locationData.totalCheckIns}</div>
-                    </div>
-                </div>
-                <div class="bg-white border border-blue-100 rounded-lg p-3">
-                    <h4 class="text-sm font-semibold text-gray-700">ממוצע לפי שעה (היום)</h4>
-                    ${hourlyChartHtml}
-                </div>
-                <details class="bg-white border border-gray-200 rounded-lg p-3" ${weeklyHasData ? '' : 'open'}>
-                    <summary class="flex flex-col gap-2 cursor-pointer text-sm font-semibold text-gray-700">
-                        <span>מבט שבועי</span>
-                        ${weeklyHasData ? `<div class="text-xs text-gray-600">${weeklySummaryPreviewHtml}</div>` : ''}
-                    </summary>
-                    <div class="mt-3 text-sm text-gray-600 leading-relaxed">${weeklySummaryExpandedHtml}</div>
-                </details>
-                <div class="bg-blue-50 border border-blue-100 rounded-lg p-4">
-                    <div class="flex items-center justify-between gap-3">
+            ${waitGroupsSection}
+            ${placeInfoHtml}
+            ${hasIntel ? `
+                <section class="location-card__intel">
+                    <div class="location-card__intel-header">
                         <div>
-                            <h4 class="text-sm font-semibold text-blue-900">סקירת יעד</h4>
-                            <p class="text-xs text-blue-700 opacity-80">מידע תמציתי לביקור חכם</p>
+                            <h4 class="location-card__intel-title">סקירת יעד חכמה</h4>
+                            <p class="location-card__intel-subtitle">תובנות בזמן אמת לחוויה חלקה</p>
                         </div>
-                        ${hasIntel ? `<button type="button" class="open-intel-modal-btn text-xs font-semibold bg-blue-600 text-white rounded-full px-3 py-2 hover:bg-blue-700 transition">פתח סקירה מלאה</button>` : ''}
+                        <button type="button" class="open-intel-modal-btn location-card__intel-btn">פתח סקירה מלאה</button>
                     </div>
-                    <div class="mt-3 bg-white rounded-xl border border-blue-100/60 p-3 max-h-60 overflow-y-auto ${hasIntel ? 'intel-rich-text text-sm text-blue-900/90' : ''}">
+                    <div class="location-card__intel-body ${hasIntel ? 'intel-rich-text' : ''}">
                         ${intelPreviewHtml}
                     </div>
-                </div>
-            </div>
-        </details>
-        <button id="start-check-in-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-md hover:bg-green-700 transition">
-            התחל צ'ק-אין למקום
-        </button>
+                </section>
+            ` : ''}
+            <button id="start-check-in-btn" class="location-card__cta">
+                התחל צ'ק-אין למקום
+            </button>
+        </section>
     `;
 
-    // Add event listener to the new button
     const closeBtn = targetDetailsCard.querySelector('#close-location-card-btn');
-    document.getElementById('start-check-in-btn').onclick = startCheckIn;
+    const ctaBtn = document.getElementById('start-check-in-btn');
+    if (ctaBtn) {
+        ctaBtn.onclick = startCheckIn;
+    }
     if (closeBtn) {
         closeBtn.addEventListener('click', hideLocationCard);
     }
@@ -1749,7 +2028,6 @@ function showLocationCard(name, id) {
         });
     }
 
-    // Animate card in
     targetDetailsCard.classList.remove('float-in');
     void targetDetailsCard.offsetWidth;
     targetDetailsCard.classList.remove('translate-y-full');
@@ -2000,6 +2278,9 @@ function updatePosition(position) {
     } else {
         userMarker.setLatLng(userLatLng);
     }
+
+    const hasNearby = updateNearbyLocationsPanel();
+    setNearbyPanelVisible(hasNearby);
 
     // --- Logic for when check-in is ACTIVE ---
     if (checkInStartTime && targetCoords) {
@@ -2296,6 +2577,11 @@ function computeLocationStats(visits) {
     const safeVisits = Array.isArray(visits) ? visits : [];
     const totals = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
     const counts = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
+    const waitGroupCounts = {
+        small: { groups: 0, people: 0 },
+        medium: { groups: 0, people: 0 },
+        large: { groups: 0, people: 0 }
+    };
 
     for (const visit of safeVisits) {
         if (!visit || typeof visit !== 'object') continue;
@@ -2303,6 +2589,12 @@ function computeLocationStats(visits) {
         const dayIndex = Number.isInteger(visit.dayOfWeek) ? visit.dayOfWeek : null;
         const hourIndex = Number.isInteger(visit.hourOfDay) ? visit.hourOfDay : null;
         const waitSeconds = Number(visit.waitSeconds);
+
+        const partyInfo = resolveVisitPartyInfo(visit);
+        if (partyInfo) {
+            waitGroupCounts[partyInfo.key].groups += 1;
+            waitGroupCounts[partyInfo.key].people += partyInfo.size;
+        }
 
         if (dayIndex === null || hourIndex === null) continue;
         if (dayIndex < 0 || dayIndex >= DAY_NAMES_HE.length) continue;
@@ -2330,7 +2622,66 @@ function computeLocationStats(visits) {
         return count > 0 ? total / count : null;
     });
 
-    return { hourlyAverages, weeklyAverages, counts };
+    return { hourlyAverages, weeklyAverages, counts, waitGroupCounts };
+}
+
+const PARTY_SIZE_ESTIMATES = Object.freeze({
+    small: 2,
+    medium: 5,
+    large: 8
+});
+
+function resolveVisitPartyInfo(visit) {
+    const size = extractPartySizeValue(visit);
+    const key = categorizePartySize(size);
+
+    if (!key) {
+        return null;
+    }
+
+    const effectiveSize = Number.isFinite(size) && size > 0
+        ? size
+        : PARTY_SIZE_ESTIMATES[key];
+
+    return {
+        key,
+        size: effectiveSize
+    };
+}
+
+function extractPartySizeValue(visit) {
+    const candidates = [
+        visit?.partySize,
+        visit?.groupSize,
+        visit?.peopleCount,
+        visit?.people,
+        visit?.size
+    ];
+
+    for (const candidate of candidates) {
+        const numeric = Number(candidate);
+        if (Number.isFinite(numeric) && numeric > 0) {
+            return numeric;
+        }
+    }
+
+    return null;
+}
+
+function categorizePartySize(size) {
+    if (!Number.isFinite(size) || size <= 0) {
+        return null;
+    }
+
+    if (size <= 3) {
+        return 'small';
+    }
+
+    if (size <= 6) {
+        return 'medium';
+    }
+
+    return 'large';
 }
 
 function computeDailyAverageWaitSeconds(hourlyValues) {
