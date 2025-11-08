@@ -58,8 +58,10 @@ export function initializeApplication(context) {
         poiLayer,
         poiRefreshTimeoutId,
         poiFetchAbortController,
+        gpsPoiFetchAbortController,
         isLoadingPois,
         lastPoiFetchBounds,
+        lastGpsNearbyBounds,
         selectedPlaceInfo,
         isSavingCheckIn,
         liveStatusTimeoutId,
@@ -72,6 +74,7 @@ export function initializeApplication(context) {
         locationsLoaded,
         firebaseInitializationError,
         poiPlaces,
+        gpsNearbyPlaces,
         nearbyPanelVisible,
         confettiTimeoutId
     } = state;
@@ -177,8 +180,10 @@ export function initializeApplication(context) {
             poiLayer,
             poiRefreshTimeoutId,
             poiFetchAbortController,
+            gpsPoiFetchAbortController,
             isLoadingPois,
             lastPoiFetchBounds,
+            lastGpsNearbyBounds,
             selectedPlaceInfo,
             isSavingCheckIn,
             liveStatusTimeoutId,
@@ -191,6 +196,7 @@ export function initializeApplication(context) {
             locationsLoaded,
             firebaseInitializationError,
             poiPlaces,
+            gpsNearbyPlaces,
             nearbyPanelVisible,
             confettiTimeoutId
         });
@@ -809,6 +815,11 @@ if (targetDetailsCard) {
 async function initApp() {
     initMap();
 
+    if (nearbyLocationsList) {
+        renderNearbyPanelPlaceholder('ממתינים למיקום ה-GPS שלך כדי להציג מקומות קרובים.');
+        setNearbyPanelVisible(true);
+    }
+
     // Define user icon
     userIcon = L.divIcon({
         className: 'user-location-icon',
@@ -1035,7 +1046,7 @@ function initMap() {
 
     renderVisitedLocationsOnMap();
 
-    scheduleNearbyPlacesRefresh({ immediate: true });
+    scheduleViewportPlacesRefresh({ immediate: true });
 
     map.on('moveend', handleMapMoveEnd);
 
@@ -1043,10 +1054,10 @@ function initMap() {
 }
 
 function handleMapMoveEnd() {
-    scheduleNearbyPlacesRefresh();
+    scheduleViewportPlacesRefresh();
 }
 
-function scheduleNearbyPlacesRefresh({ immediate = false } = {}) {
+function scheduleViewportPlacesRefresh({ immediate = false } = {}) {
     if (!map) {
         return;
     }
@@ -1058,7 +1069,7 @@ function scheduleNearbyPlacesRefresh({ immediate = false } = {}) {
 
     const triggerFetch = () => {
         poiRefreshTimeoutId = null;
-        fetchNearbyPlaces().catch((error) => {
+        fetchViewportPlaces().catch((error) => {
             if (error?.name === 'AbortError') {
                 return;
             }
@@ -1075,7 +1086,7 @@ function scheduleNearbyPlacesRefresh({ immediate = false } = {}) {
     updateState();
 }
 
-async function fetchNearbyPlaces() {
+async function fetchViewportPlaces() {
     if (!map) {
         return;
     }
@@ -1089,13 +1100,10 @@ async function fetchNearbyPlaces() {
     const centerLon = Number(center?.lng);
 
     if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
-        poiPlaces = [];
         if (poiLayer) {
             poiLayer.clearLayers();
         }
         lastPoiFetchBounds = null;
-        renderNearbyPanelPlaceholder('לא ניתן לזהות את מרכז המפה. נסו לגרור או להתקרב מחדש.');
-        setNearbyPanelVisible(true);
         updateState();
         return;
     }
@@ -1110,9 +1118,6 @@ async function fetchNearbyPlaces() {
 
     poiFetchAbortController = new AbortController();
     const signal = poiFetchAbortController.signal;
-
-    isLoadingPois = true;
-    updateState();
 
     const query = buildOverpassPlacesQuery(fetchContext);
 
@@ -1145,14 +1150,10 @@ async function fetchNearbyPlaces() {
             return;
         }
         console.error('Failed to fetch nearby places', error);
-        poiPlaces = [];
-        renderNearbyPanelPlaceholder('לא הצלחנו לטעון מקומות באזור הזה. נסו שוב בעוד רגע.');
-        setNearbyPanelVisible(true);
     } finally {
         if (poiFetchAbortController?.signal === signal) {
             poiFetchAbortController = null;
         }
-        isLoadingPois = false;
         updateState();
     }
 }
@@ -1182,19 +1183,9 @@ out center 60;
 `;
 }
 
-function renderPointsOfInterest(elements, fetchContext) {
-    if (!map) {
-        return;
-    }
-
-    if (!poiLayer) {
-        poiLayer = L.layerGroup().addTo(map);
-    }
-
-    poiLayer.clearLayers();
-
+function collectPlacesFromOverpass(elements) {
     const uniqueElements = new Map();
-    for (const element of elements) {
+    for (const element of Array.isArray(elements) ? elements : []) {
         if (!element || typeof element.id === 'undefined') {
             continue;
         }
@@ -1211,6 +1202,22 @@ function renderPointsOfInterest(elements, fetchContext) {
             places.push(place);
         }
     }
+
+    return places;
+}
+
+function renderPointsOfInterest(elements, fetchContext) {
+    if (!map) {
+        return;
+    }
+
+    if (!poiLayer) {
+        poiLayer = L.layerGroup().addTo(map);
+    }
+
+    poiLayer.clearLayers();
+
+    const places = collectPlacesFromOverpass(elements);
 
     const referenceLat = Number(fetchContext?.lat);
     const referenceLon = Number(fetchContext?.lon);
@@ -1259,12 +1266,6 @@ function renderPointsOfInterest(elements, fetchContext) {
         });
     }
 
-    const hasNearby = updateNearbyLocationsPanel(fetchContext);
-    if (!hasNearby && Array.isArray(poiPlaces) && poiPlaces.length === 0) {
-        renderNearbyPanelPlaceholder('לא נמצאו מקומות באזור התצוגה. נסו לשנות את המפה.');
-    }
-    setNearbyPanelVisible(true);
-
     updateState();
 }
 
@@ -1280,26 +1281,122 @@ function renderNearbyPanelPlaceholder(message) {
     nearbyLocationsList.innerHTML = `<li class="nearby-panel__empty" role="presentation">${escapeHtml(safeMessage)}</li>`;
 }
 
-function updateNearbyLocationsPanel(referencePoint = lastPoiFetchBounds) {
+async function fetchGpsNearbyPlaces() {
+    if (!nearbyLocationsPanel || !nearbyLocationsList) {
+        return;
+    }
+
+    const coords = lastKnownPosition?.coords;
+    const lat = Number(coords?.latitude);
+    const lon = Number(coords?.longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        gpsNearbyPlaces = [];
+        lastGpsNearbyBounds = null;
+        renderNearbyPanelPlaceholder('ממתינים למיקום ה-GPS שלך כדי להציג מקומות קרובים.');
+        setNearbyPanelVisible(true);
+        updateState();
+        return;
+    }
+
+    if (gpsPoiFetchAbortController) {
+        gpsPoiFetchAbortController.abort();
+    }
+
+    const fetchContext = {
+        lat,
+        lon,
+        radius: Number(NEARBY_PLACES_RADIUS_METERS)
+    };
+
+    lastGpsNearbyBounds = fetchContext;
+
+    gpsPoiFetchAbortController = new AbortController();
+    const signal = gpsPoiFetchAbortController.signal;
+
+    isLoadingPois = true;
+    renderNearbyPanelPlaceholder('טוען מקומות בקרבתך...');
+    setNearbyPanelVisible(true);
+    updateState();
+
+    try {
+        const query = buildOverpassPlacesQuery(fetchContext);
+        const response = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+            },
+            body: new URLSearchParams({ data: query }),
+            signal
+        });
+
+        if (!response.ok) {
+            throw new Error(`Overpass API responded with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (signal.aborted) {
+            return;
+        }
+
+        const places = collectPlacesFromOverpass(Array.isArray(data?.elements) ? data.elements : []);
+
+        const prioritized = places
+            .map((place) => {
+                if (!place || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) {
+                    return null;
+                }
+                const distance = calculateDistanceMeters(lat, lon, place.lat, place.lon);
+                if (!Number.isFinite(distance)) {
+                    return null;
+                }
+                return { place, distance };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.distance - b.distance)
+            .map(({ place }) => place);
+
+        gpsNearbyPlaces = prioritized;
+        const hasRendered = renderNearbyLocationsPanel(fetchContext);
+        if (!hasRendered) {
+            renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך בטווח החיפוש.');
+        }
+    } catch (error) {
+        if (error?.name === 'AbortError') {
+            return;
+        }
+        console.error('Failed to fetch GPS nearby places', error);
+        gpsNearbyPlaces = [];
+        renderNearbyPanelPlaceholder('לא הצלחנו לטעון מקומות בקרבתך. נסו שוב בעוד רגע.');
+    } finally {
+        if (gpsPoiFetchAbortController?.signal === signal) {
+            gpsPoiFetchAbortController = null;
+        }
+        isLoadingPois = false;
+        updateState();
+    }
+}
+
+function renderNearbyLocationsPanel(referencePoint = lastGpsNearbyBounds) {
     if (!nearbyLocationsPanel || !nearbyLocationsList) {
         return false;
     }
 
-    if (!Array.isArray(poiPlaces) || poiPlaces.length === 0) {
-        renderNearbyPanelPlaceholder('לא נמצאו מקומות באזור התצוגה.');
+    if (!Array.isArray(gpsNearbyPlaces) || gpsNearbyPlaces.length === 0) {
+        renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך עדיין.');
         return false;
     }
 
-    const fallbackCenter = map?.getCenter();
-    const referenceLat = Number(referencePoint?.lat ?? fallbackCenter?.lat);
-    const referenceLon = Number(referencePoint?.lon ?? fallbackCenter?.lng);
+    const fallbackCoords = lastKnownPosition?.coords;
+    const referenceLat = Number(referencePoint?.lat ?? fallbackCoords?.latitude);
+    const referenceLon = Number(referencePoint?.lon ?? fallbackCoords?.longitude);
 
     if (!Number.isFinite(referenceLat) || !Number.isFinite(referenceLon)) {
-        renderNearbyPanelPlaceholder('לא ניתן לחשב מרחקים עבור האזור הזה.');
+        renderNearbyPanelPlaceholder('לא ניתן לחשב מרחקים עבור המיקום הנוכחי.');
         return false;
     }
 
-    const sorted = poiPlaces
+    const sorted = gpsNearbyPlaces
         .map((place) => {
             if (!place || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) {
                 return null;
@@ -1317,7 +1414,7 @@ function updateNearbyLocationsPanel(referencePoint = lastPoiFetchBounds) {
         .slice(0, 10);
 
     if (sorted.length === 0) {
-        renderNearbyPanelPlaceholder('לא נמצאו מקומות באזור התצוגה.');
+        renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך בטווח שנבחר.');
         return false;
     }
 
@@ -1411,15 +1508,23 @@ function activateNearbyItem(locationId) {
 
     const effectiveId = place.uid || `poi_${place.sourceType}_${place.id}`;
     selectLocation(place.lat, place.lon, place.displayName, effectiveId, { placeInfo: place });
-    updateNearbyLocationsPanel();
+    renderNearbyLocationsPanel();
 }
 
 function getPoiPlaceByUid(uid) {
-    if (!uid || !Array.isArray(poiPlaces)) {
+    if (!uid) {
         return null;
     }
 
-    return poiPlaces.find((place) => (place?.uid || `poi_${place?.sourceType}_${place?.id}`) === uid) || null;
+    const candidates = Array.isArray(gpsNearbyPlaces) && gpsNearbyPlaces.length > 0
+        ? gpsNearbyPlaces
+        : poiPlaces;
+
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+        return null;
+    }
+
+    return candidates.find((place) => (place?.uid || `poi_${place?.sourceType}_${place?.id}`) === uid) || null;
 }
 
 function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
@@ -1833,7 +1938,7 @@ function selectLocation(lat, lon, name, id = null, options = {}) {
     showLocationCard(name, currentLocationId);
 
     celebrateSelection();
-    updateNearbyLocationsPanel();
+    renderNearbyLocationsPanel();
     setNearbyPanelVisible(true);
 
     // Ensure map tab is active
@@ -1929,6 +2034,168 @@ const WAIT_GROUP_CATEGORY_METADATA = Object.freeze({
     medium: { key: 'medium', label: 'קבוצות של 4-6', rangeLabel: '4-6', emoji: '👨‍👩‍👧', accent: '#f59e0b' },
     large: { key: 'large', label: 'קבוצות של 7+', rangeLabel: '7+', emoji: '🎉', accent: '#ef4444' }
 });
+
+const RECENT_CHECKIN_WINDOW_MINUTES = 25;
+
+const QUEUE_STATUS_LEVELS = Object.freeze([
+    {
+        key: 'empty',
+        min: 0,
+        max: 0,
+        label: 'אין אנשים בתור',
+        accent: '#16a34a',
+        surface: 'rgba(22, 163, 74, 0.14)',
+        text: '#14532d'
+    },
+    {
+        key: 'light',
+        min: 1,
+        max: 3,
+        label: 'תור קצר · 1-3 אנשים',
+        accent: '#0ea5e9',
+        surface: 'rgba(14, 165, 233, 0.14)',
+        text: '#0f172a'
+    },
+    {
+        key: 'medium',
+        min: 4,
+        max: 6,
+        label: 'תור בינוני · 4-6 אנשים',
+        accent: '#f59e0b',
+        surface: 'rgba(245, 158, 11, 0.15)',
+        text: '#78350f'
+    },
+    {
+        key: 'busy',
+        min: 7,
+        max: Number.POSITIVE_INFINITY,
+        label: 'תור עמוס · 7+ אנשים',
+        accent: '#ef4444',
+        surface: 'rgba(239, 68, 68, 0.14)',
+        text: '#7f1d1d'
+    }
+]);
+
+function computeRecentQueueSnapshot(visits, { windowMinutes = RECENT_CHECKIN_WINDOW_MINUTES } = {}) {
+    const safeVisits = Array.isArray(visits) ? visits : [];
+    const now = Date.now();
+    const windowMs = Math.max(1, Number(windowMinutes) || 0) * 60 * 1000;
+
+    let totalPeople = 0;
+    let latestTimestamp = null;
+
+    for (const visit of safeVisits) {
+        if (!visit) continue;
+
+        const timestamp = typeof visit.timestamp === 'string' ? visit.timestamp : null;
+        if (!timestamp) {
+            continue;
+        }
+
+        const visitTime = new Date(timestamp).getTime();
+        if (!Number.isFinite(visitTime)) {
+            continue;
+        }
+
+        if (windowMs > 0 && now - visitTime > windowMs) {
+            continue;
+        }
+
+        const partyInfo = resolveVisitPartyInfo(visit);
+        if (!partyInfo) {
+            continue;
+        }
+
+        const normalizedSize = Math.max(0, Math.round(partyInfo.size || 0));
+        totalPeople += normalizedSize;
+
+        if (latestTimestamp === null || visitTime > latestTimestamp) {
+            latestTimestamp = visitTime;
+        }
+    }
+
+    if (totalPeople <= 0) {
+        totalPeople = 0;
+    }
+
+    return {
+        people: totalPeople,
+        updatedAt: latestTimestamp ? new Date(latestTimestamp) : null
+    };
+}
+
+function getQueueStatusLevel(peopleCount) {
+    const normalized = Math.max(0, Math.round(Number(peopleCount) || 0));
+    for (const level of QUEUE_STATUS_LEVELS) {
+        if (normalized >= level.min && normalized <= level.max) {
+            return { ...level, people: normalized };
+        }
+    }
+    return { ...QUEUE_STATUS_LEVELS[QUEUE_STATUS_LEVELS.length - 1], people: normalized };
+}
+
+function formatPeopleCountLabel(count) {
+    if (count <= 0) {
+        return 'אין אנשים שממתינים כרגע';
+    }
+    if (count === 1) {
+        return 'אדם אחד ממתין כרגע';
+    }
+    return `${count} אנשים ממתינים כרגע`;
+}
+
+function formatRelativeTimeFromNow(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    const diffMs = Date.now() - date.getTime();
+    const diffMinutes = Math.round(diffMs / 60000);
+
+    if (diffMinutes <= 0) {
+        return 'הרגע';
+    }
+    if (diffMinutes === 1) {
+        return 'דקה אחת';
+    }
+    if (diffMinutes < 60) {
+        return `${diffMinutes} דקות`;
+    }
+
+    const diffHours = Math.round(diffMinutes / 60);
+    if (diffHours === 1) {
+        return 'שעה אחת';
+    }
+    if (diffHours < 24) {
+        return `${diffHours} שעות`;
+    }
+
+    const diffDays = Math.round(diffHours / 24);
+    if (diffDays === 1) {
+        return 'יום אחד';
+    }
+    return `${diffDays} ימים`;
+}
+
+function renderQueueStatusSection(visits = []) {
+    const snapshot = computeRecentQueueSnapshot(visits);
+    const level = getQueueStatusLevel(snapshot.people);
+    const peopleLabel = formatPeopleCountLabel(level.people);
+    const updateHint = snapshot.updatedAt
+        ? `עודכן לפני ${formatRelativeTimeFromNow(snapshot.updatedAt)}`
+        : 'היו הראשונים לעדכן את מצב התור.';
+
+    return `
+        <section class="queue-status queue-status--${escapeHtml(level.key)}" style="--queue-status-accent: ${escapeHtml(level.accent)}; --queue-status-surface: ${escapeHtml(level.surface)}; --queue-status-text: ${escapeHtml(level.text)}" aria-label="מצב התור העדכני">
+            <div class="queue-status__header">
+                <span class="queue-status__indicator" aria-hidden="true"></span>
+                <p class="queue-status__label">${escapeHtml(level.label)}</p>
+            </div>
+            <p class="queue-status__metric">${escapeHtml(peopleLabel)}</p>
+            <p class="queue-status__hint">${escapeHtml(updateHint)}</p>
+        </section>
+    `;
+}
 
 function renderCurrentWaitSnapshot(latestVisit, waitGroupCounts = {}) {
     const latestWaitSeconds = Number(latestVisit?.waitSeconds);
@@ -2089,7 +2356,7 @@ function showLocationCard(name, id) {
         maxLength: 240
     });
     const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
-    const waitGroupsSection = renderWaitGroupsSection(stats.waitGroupCounts, latestVisit);
+    const queueStatusSection = renderQueueStatusSection(locationData.visits);
     const hourlyAverageHtml = `
         <section class="location-card__hourly" aria-label="ממוצע ההמתנה לשעה זו">
             <p class="location-card__hourly-title">ממוצע ההמתנה לשעה זו</p>
@@ -2123,13 +2390,19 @@ function showLocationCard(name, id) {
         <section class="location-card" aria-label="פרטי המקום ${escapeHtml(name)}">
             <header class="location-card__header">
                 <h3 class="location-card__title">${escapeHtml(name)}</h3>
-                <button id="close-location-card-btn" type="button" class="location-card__close" aria-label="סגירת חלון מידע">
-                    <span aria-hidden="true">✕</span>
-                </button>
+                <div class="location-card__header-actions">
+                    <button type="button" class="location-card__quick-checkin" aria-label="צ'ק-אין מידי למקום">צ'ק-אין</button>
+                    <button id="close-location-card-btn" type="button" class="location-card__close" aria-label="סגירת חלון מידע">
+                        <span aria-hidden="true">✕</span>
+                    </button>
+                </div>
             </header>
+            <div class="location-card__actions">
+                <button type="button" class="location-card__checkin-btn">צ'ק-אין למקום</button>
+            </div>
             ${placeInfoHtml}
+            ${queueStatusSection}
             ${hourlyAverageHtml}
-            ${waitGroupsSection}
             ${intelSection}
         </section>
     `;
@@ -2137,6 +2410,22 @@ function showLocationCard(name, id) {
     const closeBtn = targetDetailsCard.querySelector('#close-location-card-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', hideLocationCard);
+    }
+
+    const quickCheckInBtn = targetDetailsCard.querySelector('.location-card__quick-checkin');
+    if (quickCheckInBtn) {
+        quickCheckInBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            startCheckIn();
+        });
+    }
+
+    const primaryCheckInBtn = targetDetailsCard.querySelector('.location-card__checkin-btn');
+    if (primaryCheckInBtn) {
+        primaryCheckInBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            startCheckIn();
+        });
     }
 
     const intelModalBtn = targetDetailsCard.querySelector('.open-intel-modal-btn');
@@ -2397,9 +2686,10 @@ function updatePosition(position) {
         userMarker.setLatLng(userLatLng);
     }
 
-    scheduleNearbyPlacesRefresh({ immediate: true });
+    scheduleViewportPlacesRefresh({ immediate: true });
 
-    updateNearbyLocationsPanel();
+    void fetchGpsNearbyPlaces();
+    renderNearbyLocationsPanel();
     setNearbyPanelVisible(true);
 
     // --- Logic for when check-in is ACTIVE ---
@@ -2429,6 +2719,11 @@ function handleGpsError(error) {
         navigator.geolocation.clearWatch(gpsWatcherId);
         gpsWatcherId = null;
     }
+
+    gpsNearbyPlaces = [];
+    lastGpsNearbyBounds = null;
+    renderNearbyPanelPlaceholder('לא ניתן לקבל מיקום GPS. אפשרו גישה למיקום כדי להציג מקומות קרובים.');
+    setNearbyPanelVisible(true);
 
     if (checkInStartTime) {
         waitingDistance.textContent = "שגיאת GPS";

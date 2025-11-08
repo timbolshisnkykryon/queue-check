@@ -468,6 +468,12 @@
             gap: 1rem;
         }
 
+        .location-card__header-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
         .location-card__title {
             font-size: 1.35rem;
             font-weight: 700;
@@ -499,6 +505,57 @@
             background: rgba(59, 130, 246, 0.22);
             box-shadow: 0 15px 25px rgba(59, 130, 246, 0.25);
             transform: translateY(-1px) scale(1.05);
+        }
+
+        .location-card__quick-checkin {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.45rem 0.9rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #0f172a;
+            background: rgba(59, 130, 246, 0.12);
+            border: 1px solid rgba(59, 130, 246, 0.35);
+            transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+        }
+
+        .location-card__quick-checkin:hover {
+            background: rgba(59, 130, 246, 0.2);
+            transform: translateY(-1px);
+            box-shadow: 0 12px 20px rgba(59, 130, 246, 0.25);
+        }
+
+        .location-card__actions {
+            margin: 1rem 0 1.25rem;
+        }
+
+        .location-card__checkin-btn {
+            width: 100%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            font-size: 1rem;
+            font-weight: 700;
+            color: #ffffff;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            border: none;
+            border-radius: 1rem;
+            padding: 0.85rem 1.25rem;
+            box-shadow: 0 25px 40px rgba(37, 99, 235, 0.35);
+            transition: transform 160ms ease, box-shadow 160ms ease;
+        }
+
+        .location-card__checkin-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 30px 50px rgba(37, 99, 235, 0.4);
+        }
+
+        .location-card__checkin-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 18px 32px rgba(37, 99, 235, 0.3);
         }
 
         .location-card__meta {
@@ -1034,6 +1091,78 @@
         .wait-snapshot--empty .wait-snapshot__metric {
             color: #475569;
             font-weight: 400;
+        }
+
+        .queue-status {
+            position: relative;
+            margin: 1.1rem 0;
+            padding: 1.05rem 1.25rem 1.2rem;
+            border-radius: 1.2rem;
+            background: var(--queue-status-surface, rgba(59, 130, 246, 0.12));
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            color: var(--queue-status-text, #0f172a);
+            box-shadow: 0 22px 40px rgba(15, 23, 42, 0.12);
+        }
+
+        .queue-status::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: linear-gradient(135deg, var(--queue-status-accent, rgba(37, 99, 235, 0.3)) 0%, rgba(255, 255, 255, 0) 65%);
+            opacity: 0.22;
+            pointer-events: none;
+        }
+
+        .queue-status__header {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .queue-status__indicator {
+            width: 0.75rem;
+            height: 0.75rem;
+            border-radius: 9999px;
+            background: var(--queue-status-accent, #2563eb);
+            box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.2);
+        }
+
+        .queue-status__label {
+            margin: 0;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: inherit;
+        }
+
+        .queue-status__metric {
+            margin: 0 0 0.5rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: inherit;
+        }
+
+        .queue-status__hint {
+            margin: 0;
+            font-size: 0.8rem;
+            color: rgba(15, 23, 42, 0.6);
+        }
+
+        .queue-status--empty .queue-status__hint {
+            color: rgba(20, 83, 45, 0.75);
+        }
+
+        .queue-status--light .queue-status__hint {
+            color: rgba(15, 23, 42, 0.6);
+        }
+
+        .queue-status--medium .queue-status__hint {
+            color: rgba(120, 53, 15, 0.75);
+        }
+
+        .queue-status--busy .queue-status__hint {
+            color: rgba(127, 29, 29, 0.8);
         }
 
         #confetti-root {
