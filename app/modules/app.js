@@ -1121,6 +1121,9 @@ async function fetchViewportPlaces() {
 
     const query = buildOverpassPlacesQuery(fetchContext);
 
+    renderNearbyPanelPlaceholder('טוען מקומות באזור התצוגה הנוכחי...');
+    setNearbyPanelVisible(true);
+
     try {
         const response = await fetch('https://overpass-api.de/api/interpreter', {
             method: 'POST',
