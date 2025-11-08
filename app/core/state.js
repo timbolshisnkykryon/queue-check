@@ -27,8 +27,10 @@ export function createAppState() {
         poiLayer: null,
         poiRefreshTimeoutId: null,
         poiFetchAbortController: null,
+        gpsPoiFetchAbortController: null,
         isLoadingPois: false,
         lastPoiFetchBounds: null,
+        lastGpsNearbyBounds: null,
         selectedPlaceInfo: null,
         isSavingCheckIn: false,
         liveStatusTimeoutId: null,
@@ -41,6 +43,7 @@ export function createAppState() {
         locationsLoaded: false,
         firebaseInitializationError: null,
         poiPlaces: [],
+        gpsNearbyPlaces: [],
         nearbyPanelVisible: false,
         confettiTimeoutId: null
     };
