@@ -46,6 +46,7 @@ export function createAppState() {
         gpsNearbyPlaces: [],
         nearbyPanelVisible: false,
         nearbyPanelCollapsed: false,
+        nearbyPanelHasResults: false,
         confettiTimeoutId: null
     };
 }

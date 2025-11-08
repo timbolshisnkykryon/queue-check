@@ -77,6 +77,7 @@ export function initializeApplication(context) {
         gpsNearbyPlaces,
         nearbyPanelVisible,
         nearbyPanelCollapsed,
+        nearbyPanelHasResults,
         confettiTimeoutId
     } = state;
 
@@ -204,6 +205,7 @@ export function initializeApplication(context) {
             gpsNearbyPlaces,
             nearbyPanelVisible,
             nearbyPanelCollapsed,
+            nearbyPanelHasResults,
             confettiTimeoutId
         });
     }
@@ -1376,9 +1378,22 @@ function renderPointsOfInterest(elements, fetchContext) {
     updateState();
 }
 
-function renderNearbyPanelPlaceholder(message) {
+function setNearbyPanelHasResults(hasResults) {
+    const nextValue = Boolean(hasResults);
+    if (nearbyPanelHasResults !== nextValue) {
+        nearbyPanelHasResults = nextValue;
+        updateState();
+    }
+}
+
+function renderNearbyPanelPlaceholder(message, options = {}) {
     if (!nearbyLocationsList) {
-        return;
+        return false;
+    }
+
+    const { preserveExisting = false } = options;
+    if (preserveExisting && nearbyPanelHasResults) {
+        return false;
     }
 
     const safeMessage = typeof message === 'string' && message.trim().length > 0
@@ -1386,6 +1401,8 @@ function renderNearbyPanelPlaceholder(message) {
         : 'לא נמצאו מקומות להצגה באזור זה.';
 
     nearbyLocationsList.innerHTML = `<li class="nearby-panel__empty" role="presentation">${escapeHtml(safeMessage)}</li>`;
+    setNearbyPanelHasResults(false);
+    return true;
 }
 
 async function fetchGpsNearbyPlaces() {
@@ -1398,9 +1415,13 @@ async function fetchGpsNearbyPlaces() {
     const lon = Number(coords?.longitude);
 
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-        gpsNearbyPlaces = [];
+        if (!nearbyPanelHasResults) {
+            gpsNearbyPlaces = [];
+        }
         lastGpsNearbyBounds = null;
-        renderNearbyPanelPlaceholder('ממתינים למיקום ה-GPS שלך כדי להציג מקומות קרובים.');
+        renderNearbyPanelPlaceholder('ממתינים למיקום ה-GPS שלך כדי להציג מקומות קרובים.', {
+            preserveExisting: nearbyPanelHasResults
+        });
         setNearbyPanelVisible(true);
         updateState();
         return;
@@ -1461,12 +1482,17 @@ async function fetchGpsNearbyPlaces() {
             .sort((a, b) => a.distance - b.distance)
             .map(({ place }) => place);
 
-        gpsNearbyPlaces = prioritized;
+        if (prioritized.length > 0 || !nearbyPanelHasResults) {
+            gpsNearbyPlaces = prioritized;
+        }
+
         const hasRendered = renderNearbyLocationsPanel(fetchContext);
         if (hasRendered) {
             setNearbyPanelVisible(true);
         } else {
-            renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך בטווח החיפוש.');
+            renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך בטווח החיפוש.', {
+                preserveExisting: nearbyPanelHasResults
+            });
             setNearbyPanelVisible(true);
         }
     } catch (error) {
@@ -1474,8 +1500,12 @@ async function fetchGpsNearbyPlaces() {
             return;
         }
         console.error('Failed to fetch GPS nearby places', error);
-        gpsNearbyPlaces = [];
-        renderNearbyPanelPlaceholder('לא הצלחנו לטעון מקומות בקרבתך. נסו שוב בעוד רגע.');
+        if (!nearbyPanelHasResults) {
+            gpsNearbyPlaces = [];
+        }
+        renderNearbyPanelPlaceholder('לא הצלחנו לטעון מקומות בקרבתך. נסו שוב בעוד רגע.', {
+            preserveExisting: nearbyPanelHasResults
+        });
         setNearbyPanelVisible(true);
     } finally {
         if (gpsPoiFetchAbortController?.signal === signal) {
@@ -1492,8 +1522,10 @@ function renderNearbyLocationsPanel(referencePoint = lastGpsNearbyBounds) {
     }
 
     if (!Array.isArray(gpsNearbyPlaces) || gpsNearbyPlaces.length === 0) {
-        renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך עדיין.');
-        return false;
+        renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך עדיין.', {
+            preserveExisting: nearbyPanelHasResults
+        });
+        return nearbyPanelHasResults;
     }
 
     const fallbackCoords = lastKnownPosition?.coords;
@@ -1501,8 +1533,10 @@ function renderNearbyLocationsPanel(referencePoint = lastGpsNearbyBounds) {
     const referenceLon = Number(referencePoint?.lon ?? fallbackCoords?.longitude);
 
     if (!Number.isFinite(referenceLat) || !Number.isFinite(referenceLon)) {
-        renderNearbyPanelPlaceholder('לא ניתן לחשב מרחקים עבור המיקום הנוכחי.');
-        return false;
+        renderNearbyPanelPlaceholder('לא ניתן לחשב מרחקים עבור המיקום הנוכחי.', {
+            preserveExisting: nearbyPanelHasResults
+        });
+        return nearbyPanelHasResults;
     }
 
     const sorted = gpsNearbyPlaces
@@ -1523,8 +1557,10 @@ function renderNearbyLocationsPanel(referencePoint = lastGpsNearbyBounds) {
         .slice(0, 10);
 
     if (sorted.length === 0) {
-        renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך בטווח שנבחר.');
-        return false;
+        renderNearbyPanelPlaceholder('לא נמצאו מקומות בקרבתך בטווח שנבחר.', {
+            preserveExisting: nearbyPanelHasResults
+        });
+        return nearbyPanelHasResults;
     }
 
     const itemsHtml = sorted
@@ -1545,7 +1581,10 @@ function renderNearbyLocationsPanel(referencePoint = lastGpsNearbyBounds) {
         })
         .join('');
 
-    nearbyLocationsList.innerHTML = itemsHtml;
+    if (nearbyLocationsList.innerHTML !== itemsHtml) {
+        nearbyLocationsList.innerHTML = itemsHtml;
+    }
+    setNearbyPanelHasResults(true);
     return true;
 }
 
@@ -2835,9 +2874,13 @@ function handleGpsError(error) {
         gpsWatcherId = null;
     }
 
-    gpsNearbyPlaces = [];
+    if (!nearbyPanelHasResults) {
+        gpsNearbyPlaces = [];
+    }
     lastGpsNearbyBounds = null;
-    renderNearbyPanelPlaceholder('לא ניתן לקבל מיקום GPS. אפשרו גישה למיקום כדי להציג מקומות קרובים.');
+    renderNearbyPanelPlaceholder('לא ניתן לקבל מיקום GPS. אפשרו גישה למיקום כדי להציג מקומות קרובים.', {
+        preserveExisting: nearbyPanelHasResults
+    });
     setNearbyPanelVisible(true);
 
     if (checkInStartTime) {
