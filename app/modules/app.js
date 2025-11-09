@@ -4086,8 +4086,7 @@ function renderRecentVisits() {
         const detailsSections = [waitSnapshotHtml, queueStatusHtml, placeInfoHtml]
             .filter((section) => typeof section === 'string' && section.trim().length > 0);
         const detailsHtml = detailsSections.length > 0
-            ? detailsSections.join('
-')
+            ? detailsSections.join('\n')
             : '<p class="text-sm text-gray-500">אין עדיין פרטים נוספים להצגה למיקום זה.</p>';
 
         const relativeHtml = relativeLabel
