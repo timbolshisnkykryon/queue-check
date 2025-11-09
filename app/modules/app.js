@@ -2640,6 +2640,8 @@ function showCheckInConfetti() {
 
     const colors = ['#38bdf8', '#818cf8', '#facc15', '#f97316', '#34d399'];
     const pieces = 32;
+    const baseDuration = 3.6;
+    const durationVariance = 0.9;
     const fragment = document.createDocumentFragment();
 
     for (let index = 0; index < pieces; index += 1) {
@@ -2649,14 +2651,14 @@ function showCheckInConfetti() {
         piece.style.left = `${Math.random() * 100}%`;
         piece.style.setProperty('--x-start', `${(Math.random() * 40 - 20).toFixed(2)}vw`);
         piece.style.setProperty('--x-end', `${(Math.random() * 60 - 30).toFixed(2)}vw`);
-        piece.style.animationDuration = `${(1.6 + Math.random() * 0.9).toFixed(2)}s`;
+        piece.style.animationDuration = `${(baseDuration + Math.random() * durationVariance).toFixed(2)}s`;
         piece.style.animationDelay = `${(Math.random() * 0.2).toFixed(2)}s`;
         fragment.appendChild(piece);
-        window.setTimeout(() => piece.remove(), 3200);
+        window.setTimeout(() => piece.remove(), 5600);
     }
 
     confettiRoot.appendChild(fragment);
-    scheduleConfettiCleanup(3400);
+    scheduleConfettiCleanup(5800);
     updateState();
 }
 
