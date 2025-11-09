@@ -4933,7 +4933,7 @@ function renderRecentVisits() {
         const waitGroupsHtml = locationData ? renderWaitGroupsSection(stats.waitGroupCounts, latestVisit) : '';
         const placeInfoHtml = renderSelectedPlaceInfoSection(visit?.placeInfo || null);
 
-        const detailsSections = [waitSnapshotHtml, queueStatusHtml, waitGroupsHtml, placeInfoHtml]
+        const detailsSections = [placeInfoHtml] //waitSnapshotHtml, queueStatusHtml, waitGroupsHtml, 
             .filter((section) => typeof section === 'string' && section.trim().length > 0);
         const detailsHtml = detailsSections.length > 0
             ? detailsSections.join('\n')
