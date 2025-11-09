@@ -48,6 +48,8 @@ export function createAppState() {
         nearbyPanelCollapsed: false,
         nearbyPanelHasResults: false,
         selectedPartySizeKey: 'small',
+        pendingPartySizeSelectionKey: 'small',
+        isPartySizePromptOpen: false,
         confettiTimeoutId: null,
         recentVisits: []
     };

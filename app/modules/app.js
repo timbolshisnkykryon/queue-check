@@ -65,6 +65,8 @@ export function initializeApplication(context) {
         selectedPlaceInfo,
         isSavingCheckIn,
         selectedPartySizeKey,
+        pendingPartySizeSelectionKey,
+        isPartySizePromptOpen,
         liveStatusTimeoutId,
         waitingSyncHideTimeoutId,
         renameLocationPendingId,
@@ -113,6 +115,10 @@ export function initializeApplication(context) {
         waitingGroupPositionHint,
         partySizeSelector,
         partySizeOptionButtons,
+        partySizePrompt,
+        partySizePromptOptionButtons,
+        partySizePromptConfirmBtn,
+        partySizePromptCancelBtn,
         miniMapEl,
         infoLoading,
         infoResult,
@@ -166,6 +172,9 @@ export function initializeApplication(context) {
     let nearbyPanelMobileQuery = null;
 
     const partySizeButtons = Array.isArray(partySizeOptionButtons) ? partySizeOptionButtons : [];
+    const partySizePromptButtons = Array.isArray(partySizePromptOptionButtons) ? partySizePromptOptionButtons : [];
+    let partySizePromptResolver = null;
+
 
     const RECENT_VISITS_STORAGE_KEY = 'tfosMakomRecentVisits';
     const MAX_RECENT_VISITS = 20;
@@ -213,6 +222,106 @@ export function initializeApplication(context) {
             if (!(button instanceof HTMLButtonElement)) return;
             button.disabled = Boolean(disabled);
             button.setAttribute('data-disabled', disabled ? 'true' : 'false');
+        });
+    }
+
+    function updatePartySizePromptSelectionUI() {
+        if (!partySizePromptButtons.length) {
+            if (partySizePromptConfirmBtn) {
+                partySizePromptConfirmBtn.disabled = false;
+            }
+            return;
+        }
+
+        const normalizedKey = normalizePartySizeKey(pendingPartySizeSelectionKey || selectedPartySizeKey);
+
+        partySizePromptButtons.forEach((button) => {
+            if (!(button instanceof HTMLElement)) return;
+            const key = normalizePartySizeKey(button.dataset.partyKey);
+            const isActive = key === normalizedKey;
+            button.classList.toggle('is-active', isActive);
+            button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+            button.setAttribute('tabindex', isActive ? '0' : '-1');
+        });
+
+        if (partySizePromptConfirmBtn) {
+            partySizePromptConfirmBtn.disabled = !normalizedKey;
+        }
+    }
+
+    function setPendingPartySizeSelectionKey(newKey) {
+        pendingPartySizeSelectionKey = normalizePartySizeKey(newKey || pendingPartySizeSelectionKey || selectedPartySizeKey);
+        updatePartySizePromptSelectionUI();
+        updateState();
+    }
+
+    function openPartySizePrompt(defaultKey) {
+        if (!partySizePrompt) {
+            return;
+        }
+
+        pendingPartySizeSelectionKey = normalizePartySizeKey(defaultKey || pendingPartySizeSelectionKey || selectedPartySizeKey);
+        updatePartySizePromptSelectionUI();
+
+        isPartySizePromptOpen = true;
+        partySizePrompt.setAttribute('aria-hidden', 'false');
+        partySizePrompt.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+
+        const focusTarget = partySizePromptButtons.find((button) => {
+            const key = normalizePartySizeKey(button?.dataset?.partyKey);
+            return key === pendingPartySizeSelectionKey;
+        }) || partySizePromptButtons[0] || partySizePromptConfirmBtn;
+
+        if (focusTarget && typeof focusTarget.focus === 'function') {
+            focusTarget.focus({ preventScroll: true });
+        }
+
+        updateState();
+    }
+
+    function closePartySizePrompt() {
+        if (!partySizePrompt) {
+            return;
+        }
+
+        partySizePrompt.setAttribute('aria-hidden', 'true');
+        partySizePrompt.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+        isPartySizePromptOpen = false;
+        updateState();
+    }
+
+    function resolvePartySizePrompt(result) {
+        const resolver = partySizePromptResolver;
+        partySizePromptResolver = null;
+        closePartySizePrompt();
+        if (typeof resolver === 'function') {
+            resolver(result);
+        }
+    }
+
+    function promptForPartySize(defaultKey = 'small') {
+        const normalizedDefault = normalizePartySizeKey(defaultKey);
+
+        if (!partySizePrompt) {
+            return Promise.resolve(normalizedDefault);
+        }
+
+        if (typeof partySizePromptResolver === 'function') {
+            const resolver = partySizePromptResolver;
+            partySizePromptResolver = null;
+            resolver(null);
+        }
+
+        if (isPartySizePromptOpen) {
+            closePartySizePrompt();
+        }
+
+        openPartySizePrompt(normalizedDefault);
+
+        return new Promise((resolve) => {
+            partySizePromptResolver = resolve;
         });
     }
 
@@ -274,7 +383,9 @@ export function initializeApplication(context) {
 
     function setSelectedPartySizeKey(newKey) {
         selectedPartySizeKey = normalizePartySizeKey(newKey || selectedPartySizeKey);
+        pendingPartySizeSelectionKey = selectedPartySizeKey;
         updatePartySizeSelectionUI();
+        updatePartySizePromptSelectionUI();
         updateWaitingPartyInsights();
         updateState();
     }
@@ -339,6 +450,8 @@ export function initializeApplication(context) {
             selectedPlaceInfo,
             isSavingCheckIn,
             selectedPartySizeKey,
+            pendingPartySizeSelectionKey,
+            isPartySizePromptOpen,
             liveStatusTimeoutId,
             waitingSyncHideTimeoutId,
             renameLocationPendingId,
@@ -1136,6 +1249,75 @@ async function initApp() {
 
         setSelectedPartySizeKey(selectedPartySizeKey);
     }
+
+    if (partySizePromptButtons.length) {
+        partySizePromptButtons.forEach((button, index) => {
+            if (!(button instanceof HTMLButtonElement)) return;
+
+            button.addEventListener('click', () => {
+                const key = button.dataset.partyKey;
+                setPendingPartySizeSelectionKey(key);
+            });
+
+            button.addEventListener('keydown', (event) => {
+                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    const nextIndex = (index + 1) % partySizePromptButtons.length;
+                    partySizePromptButtons[nextIndex]?.focus?.();
+                    const key = partySizePromptButtons[nextIndex]?.dataset?.partyKey;
+                    if (key) {
+                        setPendingPartySizeSelectionKey(key);
+                    }
+                } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    const nextIndex = (index - 1 + partySizePromptButtons.length) % partySizePromptButtons.length;
+                    partySizePromptButtons[nextIndex]?.focus?.();
+                    const key = partySizePromptButtons[nextIndex]?.dataset?.partyKey;
+                    if (key) {
+                        setPendingPartySizeSelectionKey(key);
+                    }
+                } else if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    const key = button.dataset.partyKey;
+                    setPendingPartySizeSelectionKey(key);
+                    if (partySizePromptConfirmBtn && !partySizePromptConfirmBtn.disabled) {
+                        partySizePromptConfirmBtn.click();
+                    }
+                }
+            });
+        });
+    }
+
+    if (partySizePromptConfirmBtn) {
+        partySizePromptConfirmBtn.addEventListener('click', () => {
+            if (partySizePromptConfirmBtn.disabled) {
+                return;
+            }
+            const normalized = normalizePartySizeKey(pendingPartySizeSelectionKey || selectedPartySizeKey || 'small');
+            resolvePartySizePrompt(normalized);
+        });
+    }
+
+    if (partySizePromptCancelBtn) {
+        partySizePromptCancelBtn.addEventListener('click', () => {
+            resolvePartySizePrompt(null);
+        });
+    }
+
+    if (partySizePrompt) {
+        partySizePrompt.addEventListener('click', (event) => {
+            if (event.target === partySizePrompt) {
+                resolvePartySizePrompt(null);
+            }
+        });
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && isPartySizePromptOpen) {
+            event.preventDefault();
+            resolvePartySizePrompt(null);
+        }
+    });
 
     cancelCheckInBtn.addEventListener('click', () => { void finishCheckIn(false); }); // Don't save
     manualFinishBtn.addEventListener('click', () => { void finishCheckIn(true); }); // Save
@@ -2666,9 +2848,18 @@ function renderWaitGroupsSection(waitGroupCounts = {}, latestVisit = null) {
 
     const normalized = (key) => {
         const data = waitGroupCounts?.[key] || {};
+        const rawUpdatedAt = data.updatedAt;
+        let updatedAt = null;
+        if (rawUpdatedAt instanceof Date && !Number.isNaN(rawUpdatedAt.getTime())) {
+            updatedAt = rawUpdatedAt;
+        } else if (typeof rawUpdatedAt === 'string') {
+            const parsed = new Date(rawUpdatedAt);
+            updatedAt = Number.isNaN(parsed.getTime()) ? null : parsed;
+        }
         return {
             groups: Number.isFinite(Number(data.groups)) ? Number(data.groups) : 0,
-            people: Number.isFinite(Number(data.people)) ? Number(data.people) : 0
+            people: Number.isFinite(Number(data.people)) ? Number(data.people) : 0,
+            updatedAt
         };
     };
 
@@ -2679,20 +2870,28 @@ function renderWaitGroupsSection(waitGroupCounts = {}, latestVisit = null) {
     const itemsHtml = categories
         .map(({ key, label, emoji, rangeLabel, accent }, index) => {
             const data = totals[index];
-            const people = Math.round(data.people);
-            const reports = Math.round(data.groups);
-            const hasPeople = people > 0;
-            const hasReports = reports > 0;
-            const primaryLabel = hasPeople
-                ? `${people} אנשים ממתינים`
-                : hasReports
-                    ? `${reports} דיווחים`
-                    : 'אין נתונים עדיין';
-            const secondaryLabel = activeKey === key
-                ? 'עודכן ממש עכשיו'
-                : hasReports
-                    ? `${reports} דיווחים אחרונים`
-                    : 'היו הראשונים לעדכן';
+            const groups = Math.max(0, Math.round(data.groups));
+            const people = Math.max(0, Math.round(data.people));
+            const updateLabel = data.updatedAt ? formatRelativeTimeFromNow(data.updatedAt) : '';
+
+            let primaryLabel;
+            if (groups > 0) {
+                primaryLabel = groups === 1 ? 'קבוצה אחת ממתינה' : `${groups} קבוצות ממתינות`;
+            } else {
+                primaryLabel = 'אין קבוצות ממתינות כרגע';
+            }
+
+            let secondaryLabel;
+            if (groups > 0) {
+                const peopleLabel = people > 0 ? `כ-${people} אנשים` : 'ללא הערכת אנשים';
+                secondaryLabel = updateLabel ? `${peopleLabel} · עודכן לפני ${updateLabel}` : peopleLabel;
+            } else {
+                secondaryLabel = updateLabel ? `עודכן לפני ${updateLabel}` : 'היו הראשונים לעדכן';
+            }
+
+            if (activeKey === key && updateLabel) {
+                secondaryLabel = `עודכן ממש עכשיו${people > 0 ? ` · כ-${people} אנשים` : ''}`;
+            }
 
             return `<div class="wait-groups__item wait-groups__item--${key} ${activeKey === key ? 'wait-groups__item--active' : ''}" style="--wait-group-accent: ${escapeHtml(accent)}">
                 <span class="wait-groups__emoji" aria-hidden="true">${escapeHtml(emoji)}</span>
@@ -2707,8 +2906,8 @@ function renderWaitGroupsSection(waitGroupCounts = {}, latestVisit = null) {
         .join('');
 
     const hint = totalReports > 0
-        ? `מבוסס על ${totalReports} צ'ק-אינים אחרונים – מתעדכן בזמן אמת לכל הצופים.`
-        : 'היו הראשונים לשתף צ׳ק-אין – העדכון יוצג מיד לכל מי שצופה במקום.';
+        ? 'הנתונים מבוססים על צ\'ק-אינים חיים מהדקות האחרונות ומציגים מי ממתין כרגע.'
+        : 'אין כרגע צ\'ק-אינים פעילים בגודל קבוצה זה – היו הראשונים לעדכן.';
 
     return `
         <section class="wait-groups">
@@ -2820,6 +3019,7 @@ function showLocationCard(name, id) {
     const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
     const queueStatusSection = renderQueueStatusSection(locationData.visits);
     const waitSnapshotHtml = renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts);
+    const waitGroupsHtml = renderWaitGroupsSection(stats.waitGroupCounts, latestVisit);
     const intelSubtitle = hasIntel
         ? 'תובנות בזמן אמת לחוויה חלקה'
         : 'המידע יופיע כאן לאחר צ׳ק-אין מעודכן של הקהילה';
@@ -2855,6 +3055,7 @@ function showLocationCard(name, id) {
             </header>
             ${placeInfoHtml}
             ${queueStatusSection}
+            ${waitGroupsHtml}
             ${waitSnapshotHtml}
             ${intelSection}
             <div class="location-card__actions">
@@ -2899,23 +3100,37 @@ function showLocationCard(name, id) {
 }
 
 // --- 4. Check-In Logic ---
-function startCheckIn() {
+async function startCheckIn(options = {}) {
     if (!targetCoords) {
         alert("אנא בחר מיקום תחילה.");
         return;
     }
+
+    if (!options.skipPrompt) {
+        try {
+            const defaultKey = options.partySizeKey || pendingPartySizeSelectionKey || selectedPartySizeKey || 'small';
+            const confirmedKey = await promptForPartySize(defaultKey);
+            if (!confirmedKey) {
+                return;
+            }
+            startCheckIn({ ...options, partySizeKey: confirmedKey, skipPrompt: true });
+            return;
+        } catch (error) {
+            console.error('Failed to resolve party size prompt', error);
+            return;
+        }
+    }
+
+    const normalizedPartyKey = normalizePartySizeKey(options.partySizeKey || selectedPartySizeKey || 'small');
+    selectedPartySizeKey = normalizedPartyKey;
+    setPendingPartySizeSelectionKey(normalizedPartyKey);
+    setSelectedPartySizeKey(normalizedPartyKey);
 
     // Hide main screen, show waiting screen
     mainScreen.classList.add('hidden');
     waitingScreen.classList.remove('hidden');
 
     waitingLocationName.textContent = targetName;
-
-    if (selectedPartySizeKey) {
-        setSelectedPartySizeKey(selectedPartySizeKey);
-    } else {
-        setSelectedPartySizeKey('small');
-    }
 
     // Reset UI
     timerDisplay.textContent = "00:00";
@@ -3463,15 +3678,10 @@ async function updateLocationName(id, newName) {
     }
 }
 
-function computeLocationStats(visits) {
+function computeLocationStats(visits, options = {}) {
     const safeVisits = Array.isArray(visits) ? visits : [];
     const totals = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
     const counts = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
-    const waitGroupCounts = {
-        small: { groups: 0, people: 0 },
-        medium: { groups: 0, people: 0 },
-        large: { groups: 0, people: 0 }
-    };
 
     const groupKeys = Object.keys(WAIT_GROUP_CATEGORY_METADATA);
     const totalsByGroup = {};
@@ -3490,10 +3700,6 @@ function computeLocationStats(visits) {
         const waitSeconds = Number(visit.waitSeconds);
 
         const partyInfo = resolveVisitPartyInfo(visit);
-        if (partyInfo) {
-            waitGroupCounts[partyInfo.key].groups += 1;
-            waitGroupCounts[partyInfo.key].people += partyInfo.size;
-        }
 
         if (dayIndex === null || hourIndex === null) continue;
         if (dayIndex < 0 || dayIndex >= DAY_NAMES_HE.length) continue;
@@ -3549,6 +3755,8 @@ function computeLocationStats(visits) {
         return acc;
     }, {});
 
+    const waitGroupCounts = computeCurrentWaitGroupCounts(safeVisits, options);
+
     return { hourlyAverages, weeklyAverages, counts, waitGroupCounts, hourlyAveragesByGroup, weeklyAveragesByGroup };
 }
 
@@ -3557,6 +3765,24 @@ const PARTY_SIZE_ESTIMATES = Object.freeze({
     medium: 5,
     large: 8
 });
+
+function computeCurrentWaitGroupCounts(visits, { windowMinutes = RECENT_CHECKIN_WINDOW_MINUTES } = {}) {
+    const categories = Object.values(WAIT_GROUP_CATEGORY_METADATA);
+
+    if (!Array.isArray(categories) || categories.length === 0) {
+        return {};
+    }
+
+    return categories.reduce((acc, category) => {
+        const snapshot = computeRecentGroupQueueSnapshot(visits, category.key, { windowMinutes });
+        acc[category.key] = {
+            groups: Number.isFinite(snapshot?.groups) ? Number(snapshot.groups) : 0,
+            people: Number.isFinite(snapshot?.people) ? Number(snapshot.people) : 0,
+            updatedAt: snapshot?.updatedAt instanceof Date ? snapshot.updatedAt : null
+        };
+        return acc;
+    }, {});
+}
 
 function resolveVisitPartyInfo(visit) {
     const rawCategory = typeof visit?.partySizeCategory === 'string'
@@ -4081,9 +4307,10 @@ function renderRecentVisits() {
         const latestVisit = locationData?.visits?.[0] || null;
         const waitSnapshotHtml = locationData ? renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts) : '';
         const queueStatusHtml = locationData ? renderQueueStatusSection(locationData.visits) : '';
+        const waitGroupsHtml = locationData ? renderWaitGroupsSection(stats.waitGroupCounts, latestVisit) : '';
         const placeInfoHtml = renderSelectedPlaceInfoSection(visit?.placeInfo || null);
 
-        const detailsSections = [waitSnapshotHtml, queueStatusHtml, placeInfoHtml]
+        const detailsSections = [waitSnapshotHtml, queueStatusHtml, waitGroupsHtml, placeInfoHtml]
             .filter((section) => typeof section === 'string' && section.trim().length > 0);
         const detailsHtml = detailsSections.length > 0
             ? detailsSections.join('\n')
