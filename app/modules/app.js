@@ -1464,6 +1464,7 @@ async function initApp() {
                 return;
             }
             const normalized = normalizePartySizeKey(pendingPartySizeSelectionKey || selectedPartySizeKey || 'small');
+            showCheckInConfetti();
             resolvePartySizePrompt(normalized);
         });
     }
@@ -2604,13 +2605,41 @@ function formatDistanceLabel(distanceMeters) {
     return `${kilometers.toFixed(2)} ק"מ`;
 }
 
-function celebrateSelection() {
+function clearConfettiRoot() {
     if (!confettiRoot) {
         return;
     }
 
+    while (confettiRoot.firstChild) {
+        confettiRoot.removeChild(confettiRoot.firstChild);
+    }
+}
+
+function scheduleConfettiCleanup(duration = 3000) {
+    if (!confettiRoot) {
+        return;
+    }
+
+    if (confettiTimeoutId) {
+        clearTimeout(confettiTimeoutId);
+    }
+
+    confettiTimeoutId = window.setTimeout(() => {
+        clearConfettiRoot();
+        confettiTimeoutId = null;
+        updateState();
+    }, duration);
+}
+
+function showCheckInConfetti() {
+    if (!confettiRoot) {
+        return;
+    }
+
+    clearConfettiRoot();
+
     const colors = ['#38bdf8', '#818cf8', '#facc15', '#f97316', '#34d399'];
-    const pieces = 28;
+    const pieces = 32;
     const fragment = document.createDocumentFragment();
 
     for (let index = 0; index < pieces; index += 1) {
@@ -2621,26 +2650,69 @@ function celebrateSelection() {
         piece.style.setProperty('--x-start', `${(Math.random() * 40 - 20).toFixed(2)}vw`);
         piece.style.setProperty('--x-end', `${(Math.random() * 60 - 30).toFixed(2)}vw`);
         piece.style.animationDuration = `${(1.6 + Math.random() * 0.9).toFixed(2)}s`;
-        piece.style.animationDelay = `${(Math.random() * 0.15).toFixed(2)}s`;
+        piece.style.animationDelay = `${(Math.random() * 0.2).toFixed(2)}s`;
         fragment.appendChild(piece);
-        window.setTimeout(() => piece.remove(), 2800);
+        window.setTimeout(() => piece.remove(), 3200);
     }
 
     confettiRoot.appendChild(fragment);
+    scheduleConfettiCleanup(3400);
+    updateState();
+}
 
-    if (confettiTimeoutId) {
-        clearTimeout(confettiTimeoutId);
+function showEmojiRainEffect(emoji = '🍽️') {
+    if (!confettiRoot) {
+        return;
     }
 
-    confettiTimeoutId = window.setTimeout(() => {
-        while (confettiRoot.firstChild) {
-            confettiRoot.removeChild(confettiRoot.firstChild);
-        }
-        confettiTimeoutId = null;
-        updateState();
-    }, 3000);
+    const symbol = typeof emoji === 'string' && emoji.trim() ? emoji.trim() : '🍽️';
 
+    clearConfettiRoot();
+
+    const pieces = 24;
+    const fragment = document.createDocumentFragment();
+
+    for (let index = 0; index < pieces; index += 1) {
+        const piece = document.createElement('span');
+        piece.className = 'emoji-rain-piece';
+        piece.textContent = symbol;
+        piece.style.left = `${Math.random() * 100}%`;
+        piece.style.fontSize = `${(1.4 + Math.random() * 0.8).toFixed(2)}rem`;
+        piece.style.setProperty('--x-start', `${(Math.random() * 24 - 12).toFixed(2)}vw`);
+        piece.style.setProperty('--x-end', `${(Math.random() * 28 - 14).toFixed(2)}vw`);
+        piece.style.animationDuration = `${(1.9 + Math.random() * 0.8).toFixed(2)}s`;
+        piece.style.animationDelay = `${(Math.random() * 0.25).toFixed(2)}s`;
+        fragment.appendChild(piece);
+        window.setTimeout(() => piece.remove(), 3400);
+    }
+
+    confettiRoot.appendChild(fragment);
+    scheduleConfettiCleanup(3600);
     updateState();
+}
+
+function resolveLocationCelebrationEmoji() {
+    const selectionEmoji = typeof selectedPlaceInfo?.category?.emoji === 'string'
+        ? selectedPlaceInfo.category.emoji.trim()
+        : '';
+
+    if (selectionEmoji) {
+        return selectionEmoji;
+    }
+
+    const locationData = currentLocationId ? getLocationFromCache(currentLocationId) : null;
+    if (locationData && Array.isArray(locationData.visits)) {
+        for (const visit of locationData.visits) {
+            const visitEmoji = typeof visit?.placeInfo?.category?.emoji === 'string'
+                ? visit.placeInfo.category.emoji.trim()
+                : '';
+            if (visitEmoji) {
+                return visitEmoji;
+            }
+        }
+    }
+
+    return '🍽️';
 }
 
 function normalizeOverpassElement(element) {
@@ -2982,8 +3054,6 @@ function selectLocation(lat, lon, name, id = null, options = {}) {
 
     // Show location details card
     showLocationCard(name, currentLocationId);
-
-    celebrateSelection();
     renderNearbyLocationsPanel();
     setNearbyPanelVisible(true);
 
@@ -3769,7 +3839,12 @@ async function finishCheckIn(saveData) {
         clearActiveWaitSessionStorage();
     }
 
+    const celebrationEmoji = resolveLocationCelebrationEmoji();
     const finalTimeDisplay = timerDisplay.textContent;
+
+    if (saveData) {
+        showEmojiRainEffect(celebrationEmoji);
+    }
 
     if (saveData && checkInStartTime) {
         const elapsedSeconds = (Date.now() - checkInStartTime) / 1000;
@@ -4856,7 +4931,7 @@ function renderRecentVisits() {
         const waitGroupsHtml = locationData ? renderWaitGroupsSection(stats.waitGroupCounts, latestVisit) : '';
         const placeInfoHtml = renderSelectedPlaceInfoSection(visit?.placeInfo || null);
 
-        const detailsSections = [placeInfoHtml]
+        const detailsSections = [waitSnapshotHtml, queueStatusHtml, waitGroupsHtml, placeInfoHtml]
             .filter((section) => typeof section === 'string' && section.trim().length > 0);
         const detailsHtml = detailsSections.length > 0
             ? detailsSections.join('\n')
