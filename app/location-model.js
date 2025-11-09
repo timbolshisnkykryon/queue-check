@@ -50,6 +50,62 @@ function normalizePartySizeRange(range, categoryKey) {
     return category.label;
 }
 
+function normalizeLiveQueueEntry(entry) {
+    if (!entry || typeof entry !== 'object') {
+        return null;
+    }
+
+    const sessionId = typeof entry.id === 'string' ? entry.id.trim() : '';
+    const rawCategory = typeof entry.category === 'string' ? entry.category.trim().toLowerCase() : '';
+
+    if (!sessionId || !rawCategory || !PARTY_SIZE_CATEGORY_MAP[rawCategory]) {
+        return null;
+    }
+
+    const sizeCandidate = Number(entry.size);
+    const normalizedSize = Number.isFinite(sizeCandidate) && sizeCandidate > 0
+        ? sizeCandidate
+        : PARTY_SIZE_CATEGORY_MAP[rawCategory].estimate;
+
+    const enteredAt = normalizeTimestamp(entry.enteredAt);
+
+    return {
+        id: sessionId,
+        category: rawCategory,
+        size: normalizedSize,
+        enteredAt
+    };
+}
+
+export function normalizeLiveQueueRecord(rawQueue) {
+    if (!rawQueue || typeof rawQueue !== 'object') {
+        return {
+            version: 1,
+            entries: [],
+            updatedAt: null
+        };
+    }
+
+    const version = Number.isInteger(rawQueue.version) ? rawQueue.version : 1;
+    const updatedAt = normalizeTimestamp(rawQueue.updatedAt);
+
+    const entries = Array.isArray(rawQueue.entries)
+        ? rawQueue.entries.map(normalizeLiveQueueEntry).filter(Boolean)
+        : [];
+
+    entries.sort((a, b) => {
+        const aTime = a.enteredAt ? new Date(a.enteredAt).getTime() : 0;
+        const bTime = b.enteredAt ? new Date(b.enteredAt).getTime() : 0;
+        return aTime - bTime;
+    });
+
+    return {
+        version,
+        entries,
+        updatedAt
+    };
+}
+
 function resolvePartySizeSelection(partySizeKey) {
     const key = typeof partySizeKey === 'string' ? partySizeKey.trim().toLowerCase() : '';
     const category = PARTY_SIZE_CATEGORY_MAP[key] || PARTY_SIZE_CATEGORY_MAP.small;
@@ -228,7 +284,8 @@ export function normalizeLocationRecord(id, data = {}, options = {}) {
         avgWaitSeconds: Number.isFinite(Number(data.avgWaitSeconds)) ? Number(data.avgWaitSeconds) : 0,
         visits: visits.slice(0, options.maxVisitHistory ?? MAX_VISIT_HISTORY),
         lastUpdatedAt: data.lastUpdatedAt ?? null,
-        intel
+        intel,
+        liveQueue: normalizeLiveQueueRecord(data.liveQueue)
     };
 }
 
