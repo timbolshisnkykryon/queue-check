@@ -33,10 +33,16 @@ function testNormalizeVisitEntry() {
 
     assert.equal(normalized.timestamp, '2024-01-01T10:00:00.000Z');
     assert.equal(normalized.waitSeconds, 120);
+    assert.equal(normalized.partySize, 1);
+    assert.equal(normalized.partySizeCategory, 'small');
+    assert.equal(normalized.partySizeRange, '1-3');
 
     const fallback = normalizeVisitEntry({ waitSeconds: 60 }, { now: baseNow });
     assert.equal(fallback.dayOfWeek, baseNow.getDay());
     assert.equal(fallback.hourOfDay, baseNow.getHours());
+    assert.equal(fallback.partySize, 1);
+    assert.equal(fallback.partySizeCategory, 'small');
+    assert.equal(fallback.partySizeRange, '1-3');
 
     assert.equal(normalizeVisitEntry({ waitSeconds: 0 }), null);
 }
@@ -91,7 +97,8 @@ function testPrepareCheckInUpdate() {
         waitSeconds: 90,
         now,
         name: 'Override',
-        coords: { latitude: 32.31, longitude: 34.71 }
+        coords: { latitude: 32.31, longitude: 34.71 },
+        partySizeKey: 'medium'
     });
 
     assert.equal(data.totalCheckIns, 3);
@@ -100,6 +107,9 @@ function testPrepareCheckInUpdate() {
     assert.equal(data.visits.length, 1);
     assert.equal(data.visits[0].dayOfWeek, now.getDay());
     assert.equal(data.visits[0].hourOfDay, now.getHours());
+    assert.equal(data.visits[0].partySizeCategory, 'medium');
+    assert.equal(data.visits[0].partySizeRange, '4-6');
+    assert.equal(data.visits[0].partySize, 5);
 }
 
 function testPrepareCheckInUpdateHistoryLimit() {
@@ -118,6 +128,7 @@ function testPrepareCheckInUpdateHistoryLimit() {
 
     assert.equal(data.visits.length, MAX_VISIT_HISTORY);
     assert.equal(data.visits[0].waitSeconds, 120);
+    assert.equal(data.visits[0].partySizeCategory, 'small');
 }
 
 function runTests() {

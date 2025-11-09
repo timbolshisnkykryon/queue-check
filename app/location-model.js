@@ -1,5 +1,66 @@
 export const MAX_VISIT_HISTORY = 20;
 
+const PARTY_SIZE_CATEGORIES = Object.freeze([
+    { key: 'small', label: '1-3', max: 3, estimate: 2 },
+    { key: 'medium', label: '4-6', max: 6, estimate: 5 },
+    { key: 'large', label: '7+', max: Infinity, estimate: 8 }
+]);
+
+const PARTY_SIZE_CATEGORY_MAP = PARTY_SIZE_CATEGORIES.reduce((acc, entry) => {
+    acc[entry.key] = entry;
+    return acc;
+}, {});
+
+function categorizePartySizeValue(size) {
+    if (!Number.isFinite(size) || size <= 0) {
+        return 'small';
+    }
+
+    if (size <= PARTY_SIZE_CATEGORY_MAP.small.max) {
+        return 'small';
+    }
+
+    if (size <= PARTY_SIZE_CATEGORY_MAP.medium.max) {
+        return 'medium';
+    }
+
+    return 'large';
+}
+
+function normalizePartySizeCategory(category, fallbackSize) {
+    const normalized = typeof category === 'string' ? category.trim().toLowerCase() : '';
+    if (normalized && PARTY_SIZE_CATEGORY_MAP[normalized]) {
+        return normalized;
+    }
+
+    if (Number.isFinite(fallbackSize) && fallbackSize > 0) {
+        return categorizePartySizeValue(fallbackSize);
+    }
+
+    return 'small';
+}
+
+function normalizePartySizeRange(range, categoryKey) {
+    const candidate = typeof range === 'string' ? range.trim() : '';
+    if (candidate.length > 0) {
+        return candidate;
+    }
+
+    const category = PARTY_SIZE_CATEGORY_MAP[categoryKey] || PARTY_SIZE_CATEGORY_MAP.small;
+    return category.label;
+}
+
+function resolvePartySizeSelection(partySizeKey) {
+    const key = typeof partySizeKey === 'string' ? partySizeKey.trim().toLowerCase() : '';
+    const category = PARTY_SIZE_CATEGORY_MAP[key] || PARTY_SIZE_CATEGORY_MAP.small;
+
+    return {
+        category: category.key,
+        size: category.estimate,
+        range: category.label
+    };
+}
+
 function normalizeTimestamp(value) {
     if (!value) return null;
 
@@ -105,7 +166,8 @@ export function normalizeVisitEntry(entry, { now = new Date() } = {}) {
         visit.groupSize,
         visit.peopleCount,
         visit.people,
-        visit.size
+        visit.size,
+        visit.partySizeEstimate
     ];
     let partySize = null;
     for (const candidate of partyCandidates) {
@@ -115,6 +177,17 @@ export function normalizeVisitEntry(entry, { now = new Date() } = {}) {
             break;
         }
     }
+
+    if (!Number.isFinite(partySize) || partySize <= 0) {
+        partySize = 1;
+    }
+
+    const partySizeCategory = normalizePartySizeCategory(visit.partySizeCategory, partySize);
+    const partySizeRange = normalizePartySizeRange(visit.partySizeRange, partySizeCategory);
+    const categoryMeta = PARTY_SIZE_CATEGORY_MAP[partySizeCategory] || PARTY_SIZE_CATEGORY_MAP.small;
+    const normalizedPartySize = Number.isFinite(partySize) && partySize > 0
+        ? partySize
+        : categoryMeta.estimate;
 
     if (!Number.isInteger(visit.dayOfWeek) || visit.dayOfWeek < 0 || visit.dayOfWeek > 6) {
         const derivedDate = new Date(visit.timestamp);
@@ -129,7 +202,9 @@ export function normalizeVisitEntry(entry, { now = new Date() } = {}) {
     return {
         timestamp: visit.timestamp,
         waitSeconds,
-        partySize,
+        partySize: normalizedPartySize,
+        partySizeCategory,
+        partySizeRange,
         dayOfWeek: visit.dayOfWeek,
         hourOfDay: visit.hourOfDay
     };
@@ -163,7 +238,8 @@ export function prepareCheckInUpdate(existingRecord = {}, payload = {}) {
         now = new Date(),
         coords = null,
         name = null,
-        maxVisitHistory = MAX_VISIT_HISTORY
+        maxVisitHistory = MAX_VISIT_HISTORY,
+        partySizeKey = 'small'
     } = payload;
 
     const normalizedExisting = {
@@ -181,11 +257,15 @@ export function prepareCheckInUpdate(existingRecord = {}, payload = {}) {
 
     const dayIndex = now.getDay();
     const hourIndex = now.getHours();
+    const partySelection = resolvePartySizeSelection(partySizeKey);
     const newVisit = {
         timestamp: now.toISOString(),
         waitSeconds: Number(waitSeconds),
         dayOfWeek: dayIndex,
-        hourOfDay: hourIndex
+        hourOfDay: hourIndex,
+        partySize: partySelection.size,
+        partySizeCategory: partySelection.category,
+        partySizeRange: partySelection.range
     };
 
     const updatedVisits = [newVisit, ...normalizedExisting.visits].slice(0, maxVisitHistory);
