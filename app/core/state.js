@@ -50,6 +50,10 @@ export function createAppState() {
         selectedPartySizeKey: 'small',
         pendingPartySizeSelectionKey: 'small',
         isPartySizePromptOpen: false,
+        activeWaitSessionId: null,
+        activeWaitLocationId: null,
+        activeWaitPartyKey: 'small',
+        activeWaitRegisteredAt: null,
         confettiTimeoutId: null,
         recentVisits: []
     };
