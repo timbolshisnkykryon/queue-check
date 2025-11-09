@@ -47,6 +47,8 @@ export function createAppState() {
         nearbyPanelVisible: false,
         nearbyPanelCollapsed: false,
         nearbyPanelHasResults: false,
-        confettiTimeoutId: null
+        selectedPartySizeKey: 'small',
+        confettiTimeoutId: null,
+        recentVisits: []
     };
 }

@@ -64,6 +64,7 @@ export function initializeApplication(context) {
         lastGpsNearbyBounds,
         selectedPlaceInfo,
         isSavingCheckIn,
+        selectedPartySizeKey,
         liveStatusTimeoutId,
         waitingSyncHideTimeoutId,
         renameLocationPendingId,
@@ -78,7 +79,8 @@ export function initializeApplication(context) {
         nearbyPanelVisible,
         nearbyPanelCollapsed,
         nearbyPanelHasResults,
-        confettiTimeoutId
+        confettiTimeoutId,
+        recentVisits
     } = state;
 
     const {
@@ -99,12 +101,18 @@ export function initializeApplication(context) {
         nearbyLocationsPanel,
         nearbyPanelToggleBtn,
         nearbyLocationsList,
-        allLocationsList,
+        recentVisitsList,
         waitingLocationName,
         timerDisplay,
         waitingDistance,
         waitingBearing,
         gpsCountdownEl,
+        waitingGroupAverageValue,
+        waitingGroupAverageHint,
+        waitingGroupPositionValue,
+        waitingGroupPositionHint,
+        partySizeSelector,
+        partySizeOptionButtons,
         miniMapEl,
         infoLoading,
         infoResult,
@@ -157,6 +165,144 @@ export function initializeApplication(context) {
 
     let nearbyPanelMobileQuery = null;
 
+    const partySizeButtons = Array.isArray(partySizeOptionButtons) ? partySizeOptionButtons : [];
+
+    const RECENT_VISITS_STORAGE_KEY = 'tfosMakomRecentVisits';
+    const MAX_RECENT_VISITS = 20;
+
+    recentVisits = normalizeRecentVisitsArray(
+        Array.isArray(recentVisits) && recentVisits.length > 0
+            ? recentVisits
+            : loadRecentVisitsFromStorage()
+    );
+    persistRecentVisits(recentVisits);
+
+    function normalizePartySizeKey(key) {
+        const normalized = typeof key === 'string' ? key.trim().toLowerCase() : '';
+        return normalized && WAIT_GROUP_CATEGORY_METADATA[normalized]
+            ? normalized
+            : 'small';
+    }
+
+    function updatePartySizeSelectionUI() {
+        if (!partySizeButtons.length) {
+            return;
+        }
+
+        const normalizedKey = normalizePartySizeKey(selectedPartySizeKey);
+        partySizeButtons.forEach((button) => {
+            if (!(button instanceof HTMLElement)) return;
+            const key = normalizePartySizeKey(button.dataset.partyKey);
+            const isActive = key === normalizedKey;
+            button.classList.toggle('is-active', isActive);
+            button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+            button.setAttribute('tabindex', isActive ? '0' : '-1');
+        });
+
+        if (partySizeSelector) {
+            partySizeSelector.setAttribute('data-selected', normalizedKey);
+        }
+    }
+
+    function setPartySizeButtonsDisabled(disabled) {
+        if (!partySizeButtons.length) {
+            return;
+        }
+
+        partySizeButtons.forEach((button) => {
+            if (!(button instanceof HTMLButtonElement)) return;
+            button.disabled = Boolean(disabled);
+            button.setAttribute('data-disabled', disabled ? 'true' : 'false');
+        });
+    }
+
+    function updateWaitingPartyInsights() {
+        if (
+            !waitingGroupAverageValue ||
+            !waitingGroupAverageHint ||
+            !waitingGroupPositionValue ||
+            !waitingGroupPositionHint
+        ) {
+            return;
+        }
+
+        const normalizedKey = normalizePartySizeKey(selectedPartySizeKey);
+        const category = WAIT_GROUP_CATEGORY_METADATA[normalizedKey] || WAIT_GROUP_CATEGORY_METADATA.small;
+        const locationData = currentLocationId ? getLocationFromCache(currentLocationId) : null;
+        const visits = Array.isArray(locationData?.visits) ? locationData.visits : [];
+        const stats = computeLocationStats(visits);
+        const { dayIndex, hourIndex } = getCurrentTimeContext();
+
+        let averageSeconds = null;
+        const hourlyByGroup = stats?.hourlyAveragesByGroup?.[normalizedKey];
+        const hourlyRow = Array.isArray(hourlyByGroup?.[dayIndex]) ? hourlyByGroup[dayIndex] : null;
+        const maybeAverage = Array.isArray(hourlyRow) ? hourlyRow[hourIndex] : null;
+        if (Number.isFinite(maybeAverage) && maybeAverage > 0) {
+            averageSeconds = maybeAverage;
+        }
+
+        if (averageSeconds !== null) {
+            waitingGroupAverageValue.textContent = formatDurationWithUnits(averageSeconds);
+            waitingGroupAverageHint.textContent = `${DAY_NAMES_HE[dayIndex]} · ${formatHourLabel(hourIndex)} · ממוצע לקבוצות ${category.rangeLabel}`;
+        } else {
+            waitingGroupAverageValue.textContent = 'אין נתונים';
+            waitingGroupAverageHint.textContent = 'נעדכן ברגע שיגיעו דיווחים לשעה ולגודל קבוצה זה.';
+        }
+
+        const queueSnapshot = computeRecentGroupQueueSnapshot(visits, normalizedKey);
+        const groupsAhead = Math.max(0, Number(queueSnapshot?.groups) || 0);
+        const peopleAhead = Math.max(0, Number(queueSnapshot?.people) || 0);
+        const position = groupsAhead + 1;
+
+        waitingGroupPositionValue.textContent = `מקום ${position}`;
+
+        let aheadText;
+        if (groupsAhead > 0) {
+            const groupLabel = groupsAhead === 1 ? 'קבוצה אחת' : `${groupsAhead} קבוצות`;
+            const peopleLabel = peopleAhead > 0 ? ` · כ-${peopleAhead} אנשים` : '';
+            aheadText = `${groupLabel} בגודל ${category.rangeLabel} ממתינות לפניכם${peopleLabel}`;
+        } else {
+            aheadText = `אין כרגע קבוצות בגודל ${category.rangeLabel} לפניכם בתור`;
+        }
+
+        const updateText = queueSnapshot?.updatedAt
+            ? `עודכן לפני ${formatRelativeTimeFromNow(queueSnapshot.updatedAt)}.`
+            : 'נעדכן בזמן אמת אחרי צ׳ק-אין חדש.';
+
+        waitingGroupPositionHint.textContent = `${aheadText}. ${updateText}`;
+    }
+
+    function setSelectedPartySizeKey(newKey) {
+        selectedPartySizeKey = normalizePartySizeKey(newKey || selectedPartySizeKey);
+        updatePartySizeSelectionUI();
+        updateWaitingPartyInsights();
+        updateState();
+    }
+
+    function cyclePartySizeSelection(step, currentIndex = null) {
+        if (!partySizeButtons.length) {
+            return;
+        }
+
+        let index = Number.isInteger(currentIndex) ? currentIndex : partySizeButtons.findIndex((button) => {
+            const key = normalizePartySizeKey(button?.dataset?.partyKey);
+            return key === selectedPartySizeKey;
+        });
+
+        if (index < 0) {
+            index = 0;
+        }
+
+        const total = partySizeButtons.length;
+        const nextIndex = (index + step + total) % total;
+        const nextButton = partySizeButtons[nextIndex];
+        if (nextButton) {
+            const nextKey = nextButton.dataset?.partyKey;
+            setSelectedPartySizeKey(nextKey);
+            nextButton.focus();
+        }
+    }
+
     function updateState() {
         Object.assign(state, {
             map,
@@ -192,6 +338,7 @@ export function initializeApplication(context) {
             lastGpsNearbyBounds,
             selectedPlaceInfo,
             isSavingCheckIn,
+            selectedPartySizeKey,
             liveStatusTimeoutId,
             waitingSyncHideTimeoutId,
             renameLocationPendingId,
@@ -206,7 +353,8 @@ export function initializeApplication(context) {
             nearbyPanelVisible,
             nearbyPanelCollapsed,
             nearbyPanelHasResults,
-            confettiTimeoutId
+            confettiTimeoutId,
+            recentVisits
         });
     }
 
@@ -956,6 +1104,39 @@ async function initApp() {
         nearbyLocationsList.addEventListener('keydown', handleNearbyListKeyDown);
     }
 
+    if (partySizeButtons.length) {
+        partySizeButtons.forEach((button, index) => {
+            if (!(button instanceof HTMLButtonElement)) return;
+
+            button.addEventListener('click', () => {
+                const key = button.dataset.partyKey;
+                setSelectedPartySizeKey(key);
+            });
+
+            button.addEventListener('keydown', (event) => {
+                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    cyclePartySizeSelection(1, index);
+                } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    cyclePartySizeSelection(-1, index);
+                } else if (event.key === 'Home') {
+                    event.preventDefault();
+                    cyclePartySizeSelection(-index, index);
+                } else if (event.key === 'End') {
+                    event.preventDefault();
+                    cyclePartySizeSelection(partySizeButtons.length - 1 - index, index);
+                } else if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    const key = button.dataset.partyKey;
+                    setSelectedPartySizeKey(key);
+                }
+            });
+        });
+
+        setSelectedPartySizeKey(selectedPartySizeKey);
+    }
+
     cancelCheckInBtn.addEventListener('click', () => { void finishCheckIn(false); }); // Don't save
     manualFinishBtn.addEventListener('click', () => { void finishCheckIn(true); }); // Save
     closeSuccessBtn.addEventListener('click', () => successMessage.classList.add('hidden'));
@@ -1017,7 +1198,7 @@ async function initApp() {
     await initializeFirebase();
 
     // Load saved locations into tab
-    renderAllLocations();
+    renderRecentVisits();
 
     // Start GPS Watcher on load
     startGpsWatcher();
@@ -1048,7 +1229,7 @@ window.switchTab = function(tabName) {
     document.getElementById(`tab-btn-${tabName}`).classList.add('active');
 
     if (tabName === 'locations') {
-        renderAllLocations();
+        renderRecentVisits();
     } else if (tabName === 'map') {
         renderVisitedLocationsOnMap();
         // Invalidate map size to fix potential rendering issues
@@ -1061,7 +1242,7 @@ async function initializeFirebase() {
     if (!firebaseConfig) {
         firebaseInitializationError = new Error('חסרה תצורת Firebase.');
         locationsLoaded = true;
-        renderAllLocations();
+        renderRecentVisits();
         updateState();
         return;
     }
@@ -1078,7 +1259,7 @@ async function initializeFirebase() {
     } catch (error) {
         firebaseInitializationError = error;
         console.error('Failed to initialize Firebase', error);
-        renderAllLocations();
+        renderRecentVisits();
     }
 
     updateState();
@@ -1111,17 +1292,21 @@ function subscribeToLocations() {
         console.error('Firestore listener error', error);
         firebaseInitializationError = error;
         locationsLoaded = true;
-        renderAllLocations();
+        renderRecentVisits();
         updateState();
     });
 }
 
 function onLocationDataUpdated() {
-    renderAllLocations();
+    renderRecentVisits();
     renderVisitedLocationsOnMap();
 
     if (currentLocationId && targetDetailsCard && targetDetailsCard.getAttribute('aria-hidden') === 'false') {
         showLocationCard(targetName, currentLocationId);
+    }
+
+    if (checkInStartTime) {
+        updateWaitingPartyInsights();
     }
 }
 
@@ -2279,6 +2464,53 @@ function computeRecentQueueSnapshot(visits, { windowMinutes = RECENT_CHECKIN_WIN
     };
 }
 
+function computeRecentGroupQueueSnapshot(visits, partyKey, { windowMinutes = RECENT_CHECKIN_WINDOW_MINUTES } = {}) {
+    const normalizedKey = normalizePartySizeKey(partyKey);
+    const safeVisits = Array.isArray(visits) ? visits : [];
+    const now = Date.now();
+    const windowMs = Math.max(1, Number(windowMinutes) || 0) * 60 * 1000;
+
+    let groups = 0;
+    let people = 0;
+    let latestTimestamp = null;
+
+    for (const visit of safeVisits) {
+        if (!visit) continue;
+
+        const timestamp = typeof visit.timestamp === 'string' ? visit.timestamp : null;
+        if (!timestamp) {
+            continue;
+        }
+
+        const visitTime = new Date(timestamp).getTime();
+        if (!Number.isFinite(visitTime)) {
+            continue;
+        }
+
+        if (windowMs > 0 && now - visitTime > windowMs) {
+            continue;
+        }
+
+        const partyInfo = resolveVisitPartyInfo(visit);
+        if (!partyInfo || partyInfo.key !== normalizedKey) {
+            continue;
+        }
+
+        groups += 1;
+        people += Math.max(1, Math.round(partyInfo.size || 0));
+
+        if (latestTimestamp === null || visitTime > latestTimestamp) {
+            latestTimestamp = visitTime;
+        }
+    }
+
+    return {
+        groups,
+        people,
+        updatedAt: latestTimestamp ? new Date(latestTimestamp) : null
+    };
+}
+
 function getQueueStatusLevel(peopleCount) {
     const normalized = Math.max(0, Math.round(Number(peopleCount) || 0));
     for (const level of QUEUE_STATUS_LEVELS) {
@@ -2489,6 +2721,87 @@ function renderWaitGroupsSection(waitGroupCounts = {}, latestVisit = null) {
     `;
 }
 
+function renderGroupedHourlyHighlights(hourlyByGroup = {}, dayIndex, hourIndex) {
+    const categories = Object.values(WAIT_GROUP_CATEGORY_METADATA);
+
+    if (!categories.length) {
+        return '';
+    }
+
+    const subtitle = `${DAY_NAMES_HE[dayIndex]} · ${formatHourLabel(hourIndex)}`;
+
+    const cardsHtml = categories
+        .map((category) => {
+            const matrix = hourlyByGroup?.[category.key];
+            const hourlyRow = Array.isArray(matrix?.[dayIndex]) ? matrix[dayIndex] : null;
+            const value = Array.isArray(hourlyRow) ? hourlyRow[hourIndex] : null;
+            const hasData = Number.isFinite(value) && value > 0;
+            const display = hasData ? formatDurationWithUnits(value) : 'אין נתונים';
+            const hint = hasData ? 'ממוצע לשעה זו' : 'היו הראשונים לעדכן';
+            const emptyClass = hasData ? '' : ' is-empty';
+
+            return `
+                <div class="location-card__group-card location-card__group-card--${escapeHtml(category.key)}${emptyClass}">
+                    <div class="location-card__group-card-label">
+                        <span aria-hidden="true">${escapeHtml(category.emoji)}</span>
+                        <span>${escapeHtml(category.label)}</span>
+                    </div>
+                    <p class="location-card__group-card-value">${escapeHtml(display)}</p>
+                    <p class="location-card__group-card-hint">${escapeHtml(hint)}</p>
+                </div>
+            `;
+        })
+        .join('');
+
+    return `
+        <section class="location-card__group-averages" aria-label="ממוצע ההמתנה לפי גודל קבוצה">
+            <h4 class="location-card__group-title">ממוצע ההמתנה לפי גודל קבוצה</h4>
+            <p class="location-card__group-subtitle">${escapeHtml(subtitle)}</p>
+            <div class="location-card__group-grid">${cardsHtml}</div>
+        </section>
+    `;
+}
+
+function renderGroupedWeeklyHighlights(weeklyByGroup = {}, dayIndex) {
+    const categories = Object.values(WAIT_GROUP_CATEGORY_METADATA);
+
+    if (!categories.length) {
+        return '';
+    }
+
+    const dayLabel = DAY_NAMES_HE[dayIndex];
+
+    const cardsHtml = categories
+        .map((category) => {
+            const weeklyValues = weeklyByGroup?.[category.key];
+            const value = Array.isArray(weeklyValues) ? weeklyValues[dayIndex] : null;
+            const hasData = Number.isFinite(value) && value > 0;
+            const display = hasData ? formatDurationWithUnits(value) : 'אין נתונים';
+            const hint = hasData ? 'ממוצע לכל היום' : 'מחכים לעדכון מהקהילה';
+            const emptyClass = hasData ? '' : ' is-empty';
+
+            return `
+                <div class="location-card__group-card location-card__group-card--${escapeHtml(category.key)}${emptyClass}">
+                    <div class="location-card__group-card-label">
+                        <span aria-hidden="true">${escapeHtml(category.emoji)}</span>
+                        <span>${escapeHtml(category.rangeLabel)}</span>
+                    </div>
+                    <p class="location-card__group-card-value">${escapeHtml(display)}</p>
+                    <p class="location-card__group-card-hint">${escapeHtml(hint)}</p>
+                </div>
+            `;
+        })
+        .join('');
+
+    return `
+        <section class="location-card__group-weekly" aria-label="ממוצע יומי לפי גודל קבוצה">
+            <h4 class="location-card__group-title">ממוצע יומי לפי גודל קבוצה</h4>
+            <p class="location-card__group-subtitle">${escapeHtml(dayLabel)}</p>
+            <div class="location-card__group-grid">${cardsHtml}</div>
+        </section>
+    `;
+}
+
 function showLocationCard(name, id) {
     if (!targetDetailsCard) return;
     const locationData = getLocationFromCache(id) || { id, name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords), intel: null };
@@ -2497,12 +2810,6 @@ function showLocationCard(name, id) {
     const latestVisit = Array.isArray(locationData.visits) && locationData.visits.length > 0
         ? locationData.visits[0]
         : null;
-    const { dayIndex, hourIndex } = getCurrentTimeContext();
-    const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
-    const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
-    const currentDayLabel = DAY_NAMES_HE[dayIndex];
-    const currentMomentLabel = `${currentDayLabel} · ${formatHourLabel(hourIndex)}`;
-
     const hasIntel = hasIntelData(locationData.intel);
     const intelPreviewHtml = renderIntelPreviewHtml(locationData.intel, {
         emptyMessage: 'טרם נאספו תובנות למיקום זה. בצעו צ\'ק-אין ראשון כדי לקבל סקירה חכמה.',
@@ -2512,13 +2819,7 @@ function showLocationCard(name, id) {
     });
     const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
     const queueStatusSection = renderQueueStatusSection(locationData.visits);
-    const hourlyAverageHtml = `
-        <section class="location-card__hourly" aria-label="ממוצע ההמתנה לשעה זו">
-            <p class="location-card__hourly-title">ממוצע ההמתנה לשעה זו</p>
-            <p class="location-card__hourly-value">${escapeHtml(currentHourStats.label)}</p>
-            <p class="location-card__hourly-hint">${escapeHtml(currentMomentLabel)}</p>
-        </section>
-    `;
+    const waitSnapshotHtml = renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts);
     const intelSubtitle = hasIntel
         ? 'תובנות בזמן אמת לחוויה חלקה'
         : 'המידע יופיע כאן לאחר צ׳ק-אין מעודכן של הקהילה';
@@ -2554,7 +2855,7 @@ function showLocationCard(name, id) {
             </header>
             ${placeInfoHtml}
             ${queueStatusSection}
-            ${hourlyAverageHtml}
+            ${waitSnapshotHtml}
             ${intelSection}
             <div class="location-card__actions">
                 <button type="button" class="location-card__checkin-btn">צ'ק-אין למקום</button>
@@ -2609,6 +2910,12 @@ function startCheckIn() {
     waitingScreen.classList.remove('hidden');
 
     waitingLocationName.textContent = targetName;
+
+    if (selectedPartySizeKey) {
+        setSelectedPartySizeKey(selectedPartySizeKey);
+    } else {
+        setSelectedPartySizeKey('small');
+    }
 
     // Reset UI
     timerDisplay.textContent = "00:00";
@@ -2751,7 +3058,17 @@ async function finishCheckIn(saveData) {
 
         try {
             setWaitingScreenSavingState(true);
-            await saveWaitTime(currentLocationId, targetName, targetCoords, elapsedSeconds);
+            await saveWaitTime(currentLocationId, targetName, targetCoords, elapsedSeconds, selectedPartySizeKey);
+
+            recordRecentVisit({
+                locationId: currentLocationId,
+                name: targetName,
+                waitSeconds: elapsedSeconds,
+                completedAt: new Date(),
+                coords: targetCoords,
+                placeInfo: selectedPlaceInfo,
+                partySizeKey: selectedPartySizeKey
+            });
 
             // Show success message
             successTime.textContent = `זמן ההמתנה שלך (${finalTimeDisplay}) נשמר!`;
@@ -2955,7 +3272,7 @@ function getCurrentHourStats(hourlyData, hourIndex) {
     return { hasData: false, seconds: null, label: 'אין נתונים לשעה זו עדיין' };
 }
 
-async function saveWaitTime(id, name, coords, waitSeconds) {
+async function saveWaitTime(id, name, coords, waitSeconds, partySizeKey = 'small') {
     if (!firestoreDb) {
         throw new Error('Firebase אינו מוכן.');
     }
@@ -2973,7 +3290,7 @@ async function saveWaitTime(id, name, coords, waitSeconds) {
             ? normalizeLocationRecord(id, snapshot.data(), { maxVisitHistory: MAX_VISIT_HISTORY })
             : { id, name, coords: normalizedCoords, totalCheckIns: 0, totalWaitSeconds: 0, avgWaitSeconds: 0, visits: [] };
 
-        const { data } = prepareCheckInUpdate(existingData, { waitSeconds, now, name, coords: normalizedCoords });
+        const { data } = prepareCheckInUpdate(existingData, { waitSeconds, now, name, coords: normalizedCoords, partySizeKey });
 
         updatedDataForCache = { ...existingData, ...data };
 
@@ -3156,6 +3473,15 @@ function computeLocationStats(visits) {
         large: { groups: 0, people: 0 }
     };
 
+    const groupKeys = Object.keys(WAIT_GROUP_CATEGORY_METADATA);
+    const totalsByGroup = {};
+    const countsByGroup = {};
+
+    for (const key of groupKeys) {
+        totalsByGroup[key] = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
+        countsByGroup[key] = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
+    }
+
     for (const visit of safeVisits) {
         if (!visit || typeof visit !== 'object') continue;
 
@@ -3176,6 +3502,11 @@ function computeLocationStats(visits) {
 
         totals[dayIndex][hourIndex] += waitSeconds;
         counts[dayIndex][hourIndex] += 1;
+
+        if (partyInfo && totalsByGroup[partyInfo.key]) {
+            totalsByGroup[partyInfo.key][dayIndex][hourIndex] += waitSeconds;
+            countsByGroup[partyInfo.key][dayIndex][hourIndex] += 1;
+        }
     }
 
     const hourlyAverages = totals.map((dayTotals, dayIdx) =>
@@ -3184,6 +3515,16 @@ function computeLocationStats(visits) {
             return count > 0 ? total / count : null;
         })
     );
+
+    const hourlyAveragesByGroup = groupKeys.reduce((acc, key) => {
+        acc[key] = totalsByGroup[key].map((dayTotals, dayIdx) =>
+            dayTotals.map((total, hourIdx) => {
+                const count = countsByGroup[key][dayIdx][hourIdx];
+                return count > 0 ? total / count : null;
+            })
+        );
+        return acc;
+    }, {});
 
     const weeklyAverages = totals.map((dayTotals, dayIdx) => {
         let total = 0;
@@ -3195,7 +3536,20 @@ function computeLocationStats(visits) {
         return count > 0 ? total / count : null;
     });
 
-    return { hourlyAverages, weeklyAverages, counts, waitGroupCounts };
+    const weeklyAveragesByGroup = groupKeys.reduce((acc, key) => {
+        acc[key] = totalsByGroup[key].map((dayTotals, dayIdx) => {
+            let total = 0;
+            let count = 0;
+            for (let hourIdx = 0; hourIdx < HOURS_PER_DAY; hourIdx += 1) {
+                total += dayTotals[hourIdx];
+                count += countsByGroup[key][dayIdx][hourIdx];
+            }
+            return count > 0 ? total / count : null;
+        });
+        return acc;
+    }, {});
+
+    return { hourlyAverages, weeklyAverages, counts, waitGroupCounts, hourlyAveragesByGroup, weeklyAveragesByGroup };
 }
 
 const PARTY_SIZE_ESTIMATES = Object.freeze({
@@ -3205,8 +3559,13 @@ const PARTY_SIZE_ESTIMATES = Object.freeze({
 });
 
 function resolveVisitPartyInfo(visit) {
+    const rawCategory = typeof visit?.partySizeCategory === 'string'
+        ? visit.partySizeCategory.trim().toLowerCase()
+        : null;
     const size = extractPartySizeValue(visit);
-    const key = categorizePartySize(size);
+    const key = rawCategory && WAIT_GROUP_CATEGORY_METADATA[rawCategory]
+        ? rawCategory
+        : categorizePartySize(size);
 
     if (!key) {
         return null;
@@ -3475,104 +3834,318 @@ function setWaitingSyncIndicatorActive(isActive) {
     }
 }
 
-// --- 8. Render All Locations Tab ---
-function renderAllLocations() {
-    if (!allLocationsList) return;
+// --- 8. Recent Visits Tab ---
 
-    if (!locationsLoaded) {
-        allLocationsList.innerHTML = `<p class="text-gray-500 text-center">טוען נתונים מהענן...</p>`;
+
+function normalizePlaceInfoForStorage(placeInfo) {
+    if (!placeInfo || typeof placeInfo !== 'object') {
+        return null;
+    }
+
+    const category = placeInfo?.category && typeof placeInfo.category === 'object'
+        ? {
+            emoji: typeof placeInfo.category.emoji === 'string' ? placeInfo.category.emoji : '',
+            label: typeof placeInfo.category.label === 'string' ? placeInfo.category.label : ''
+        }
+        : null;
+
+    const addressLines = Array.isArray(placeInfo.addressLines)
+        ? placeInfo.addressLines.map((line) => (typeof line === 'string' ? line : '')).filter((line) => line.trim().length > 0)
+        : [];
+
+    const infoLines = Array.isArray(placeInfo.infoLines)
+        ? placeInfo.infoLines
+            .map((info) => {
+                if (!info || typeof info !== 'object') {
+                    return null;
+                }
+                const label = typeof info.label === 'string' ? info.label : '';
+                const value = typeof info.value === 'string' ? info.value : '';
+                if (!label.trim() || !value.trim()) {
+                    return null;
+                }
+                return { label, value };
+            })
+            .filter(Boolean)
+        : [];
+
+    const website = typeof placeInfo.website === 'string' ? placeInfo.website : '';
+    const websiteLabel = typeof placeInfo.websiteLabel === 'string' ? placeInfo.websiteLabel : '';
+    const phone = typeof placeInfo.phone === 'string' ? placeInfo.phone : '';
+    const openingHours = typeof placeInfo.openingHours === 'string' ? placeInfo.openingHours : '';
+    const tags = placeInfo.tags && typeof placeInfo.tags === 'object' ? placeInfo.tags : null;
+
+    if (
+        !category?.emoji &&
+        !category?.label &&
+        addressLines.length === 0 &&
+        infoLines.length === 0 &&
+        !website &&
+        !websiteLabel &&
+        !phone &&
+        !openingHours &&
+        !tags
+    ) {
+        return null;
+    }
+
+    return {
+        category: category?.emoji || category?.label ? category : null,
+        addressLines,
+        infoLines,
+        website,
+        websiteLabel,
+        phone,
+        openingHours,
+        tags
+    };
+}
+
+function normalizeRecentVisit(entry) {
+    if (!entry || typeof entry !== 'object') {
+        return null;
+    }
+
+    const waitSeconds = Number(entry.waitSeconds);
+    if (!Number.isFinite(waitSeconds) || waitSeconds <= 0) {
+        return null;
+    }
+
+    const locationId = typeof entry.locationId === 'string' ? entry.locationId : null;
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+
+    let completedAt;
+    if (entry.completedAt instanceof Date && !Number.isNaN(entry.completedAt.getTime())) {
+        completedAt = entry.completedAt.toISOString();
+    } else if (typeof entry.completedAt === 'string') {
+        const parsed = new Date(entry.completedAt);
+        completedAt = Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    }
+    if (!completedAt) {
+        completedAt = new Date().toISOString();
+    }
+
+    const coords = sanitizeCoords(entry.coords || entry.coordinates) || null;
+    const partyKeyCandidate = typeof entry.partySizeKey === 'string' ? entry.partySizeKey.trim().toLowerCase() : '';
+    const partySizeKey = partyKeyCandidate && WAIT_GROUP_CATEGORY_METADATA[partyKeyCandidate]
+        ? partyKeyCandidate
+        : null;
+
+    const placeInfo = normalizePlaceInfoForStorage(entry.placeInfo);
+
+    return {
+        locationId,
+        name,
+        waitSeconds,
+        completedAt,
+        coords,
+        placeInfo,
+        partySizeKey
+    };
+}
+
+function normalizeRecentVisitsArray(entries) {
+    if (!Array.isArray(entries)) {
+        return [];
+    }
+
+    const normalized = entries
+        .map((entry) => normalizeRecentVisit(entry))
+        .filter(Boolean);
+
+    normalized.sort((a, b) => {
+        const aTime = new Date(a.completedAt).getTime();
+        const bTime = new Date(b.completedAt).getTime();
+        return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    });
+
+    return normalized.slice(0, MAX_RECENT_VISITS);
+}
+
+function loadRecentVisitsFromStorage() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+        return [];
+    }
+
+    try {
+        const raw = window.localStorage.getItem(RECENT_VISITS_STORAGE_KEY);
+        if (!raw) {
+            return [];
+        }
+        const parsed = JSON.parse(raw);
+        return normalizeRecentVisitsArray(Array.isArray(parsed) ? parsed : []);
+    } catch (error) {
+        console.warn('Failed to load recent visits from storage', error);
+        return [];
+    }
+}
+
+function persistRecentVisits(visitsToStore) {
+    if (typeof window === 'undefined' || !window.localStorage) {
         return;
     }
 
-    if (firebaseInitializationError) {
-        const errorText = firebaseInitializationError?.message || 'אנא בדוק את החיבור והגדרות Firebase.';
-        allLocationsList.innerHTML = `<p class="text-red-500 text-center">שגיאה בטעינת נתוני Firebase: ${errorText}</p>`;
+    try {
+        const payload = Array.isArray(visitsToStore) ? visitsToStore : [];
+        window.localStorage.setItem(RECENT_VISITS_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+        console.warn('Failed to persist recent visits', error);
+    }
+}
+
+function setRecentVisits(nextVisits, { alreadyNormalized = false } = {}) {
+    recentVisits = alreadyNormalized ? [...nextVisits] : normalizeRecentVisitsArray(nextVisits);
+    persistRecentVisits(recentVisits);
+    renderRecentVisits();
+    updateState();
+}
+
+function recordRecentVisit(details) {
+    const normalized = normalizeRecentVisit(details);
+    if (!normalized) {
         return;
     }
 
-    const locations = Array.from(locationCache.entries());
+    const existing = Array.isArray(recentVisits) ? recentVisits : [];
+    const deduped = normalized.locationId
+        ? existing.filter((visit) => visit.locationId !== normalized.locationId)
+        : existing;
 
-    if (locations.length === 0) {
-        allLocationsList.innerHTML = `<p class="text-gray-500 text-center">עדיין לא שמרתם מקומות...</p>`;
+    const nextVisits = [normalized, ...deduped].slice(0, MAX_RECENT_VISITS);
+    setRecentVisits(nextVisits, { alreadyNormalized: true });
+}
+
+
+function renderRecentVisits() {
+    if (!recentVisitsList) return;
+
+    if (!Array.isArray(recentVisits) || recentVisits.length === 0) {
+        recentVisitsList.innerHTML = `<p class="text-gray-500 text-center">כשתסיימו צ'ק-אין – הביקור יופיע כאן.</p>`;
         return;
     }
 
-    allLocationsList.innerHTML = '';
+    const sortedVisits = [...recentVisits].sort((a, b) => {
+        const aTime = new Date(a?.completedAt || 0).getTime();
+        const bTime = new Date(b?.completedAt || 0).getTime();
+        return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    });
 
-    locations.sort(([, a], [, b]) => (b.totalCheckIns || 0) - (a.totalCheckIns || 0));
+    recentVisitsList.innerHTML = '';
 
-    for (const [id, data] of locations) {
-        const avgTimeDisplay = data.totalCheckIns > 0
-            ? formatDurationWithUnits(data.avgWaitSeconds)
-            : "אין עדיין מידע";
+    for (const visit of sortedVisits) {
+        const locationId = typeof visit?.locationId === 'string' ? visit.locationId : null;
+        const locationData = locationId ? getLocationFromCache(locationId) : null;
+        const locationName = visit?.name && typeof visit.name === 'string'
+            ? visit.name
+            : locationData?.name || 'מיקום ללא שם';
 
-        const stats = computeLocationStats(data.visits);
-        const { dayIndex, hourIndex } = getCurrentTimeContext();
-        const todaysHourly = stats.hourlyAverages?.[dayIndex] || [];
-        const currentHourStats = getCurrentHourStats(todaysHourly, hourIndex);
-        const currentDayLabel = DAY_NAMES_HE[dayIndex];
-        const hasIntel = hasIntelData(data.intel);
+        const waitSeconds = Number(visit?.waitSeconds);
+        const waitLabel = waitSeconds > 0 ? formatDurationWithUnits(waitSeconds) : 'לא נמדד';
 
-        const hourlyChartHtml = renderHourlyChart(todaysHourly, hourIndex, {
-            variant: 'app',
-            emptyMessage: 'אין עדיין נתונים לשעות היום עבור מיקום זה.'
-        });
+        const completedDate = visit?.completedAt ? new Date(visit.completedAt) : null;
+        const completedLabel = formatTimestamp(visit?.completedAt);
+        const relativeLabel = completedDate && !Number.isNaN(completedDate.getTime())
+            ? formatRelativeTimeFromNow(completedDate)
+            : null;
 
-        const weeklySummaryHtml = renderWeeklySummary(stats.weeklyAverages, dayIndex, {
-            variant: 'app',
-            emptyMessage: 'אין עדיין נתונים שבועיים עבור מיקום זה.'
-        });
+        const partyKey = typeof visit?.partySizeKey === 'string' ? visit.partySizeKey.trim().toLowerCase() : '';
+        const partyMeta = partyKey && WAIT_GROUP_CATEGORY_METADATA[partyKey]
+            ? WAIT_GROUP_CATEGORY_METADATA[partyKey]
+            : null;
+        const partyHtml = partyMeta
+            ? `<p class="text-sm text-gray-600">גודל קבוצה: <span class="font-medium text-blue-600">${escapeHtml(partyMeta.rangeLabel)}</span></p>`
+            : '';
+
+        const coordsSource = visit?.coords || locationData?.coords || null;
+        const rawLat = coordsSource?.lat ?? coordsSource?.latitude ?? null;
+        const rawLon = coordsSource?.lon ?? coordsSource?.lng ?? coordsSource?.longitude ?? null;
+        const lat = rawLat != null ? Number(rawLat) : null;
+        const lon = rawLon != null ? Number(rawLon) : null;
+        const canOpenLocation = Number.isFinite(lat) && Number.isFinite(lon);
+
+        const hasIntel = hasIntelData(locationData?.intel);
+        const intelButtonHtml = hasIntel
+            ? `<button class="intel-details-btn text-sm font-semibold rounded-md px-3 py-2 transition bg-purple-600 text-white hover:bg-purple-700">סקירת יעד</button>`
+            : `<button class="intel-details-btn text-sm font-semibold rounded-md px-3 py-2 transition bg-gray-100 text-gray-400 cursor-not-allowed" disabled>סקירת יעד</button>`;
+
+        const gotoButtonClass = canOpenLocation
+            ? 'goto-location-btn text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition'
+            : 'goto-location-btn text-sm bg-gray-100 text-gray-400 font-semibold py-2 px-3 rounded-md cursor-not-allowed';
+        const gotoButtonAttrs = canOpenLocation ? '' : 'disabled';
+
+        const renameButtonHtml = locationId
+            ? `<button type="button" class="rename-location-btn text-sm bg-amber-100 text-amber-700 font-semibold py-2 px-3 rounded-md hover:bg-amber-200 transition">שינוי שם</button>`
+            : '';
+
+        const stats = locationData ? computeLocationStats(locationData.visits) : { waitGroupCounts: {} };
+        const latestVisit = locationData?.visits?.[0] || null;
+        const waitSnapshotHtml = locationData ? renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts) : '';
+        const queueStatusHtml = locationData ? renderQueueStatusSection(locationData.visits) : '';
+        const placeInfoHtml = renderSelectedPlaceInfoSection(visit?.placeInfo || null);
+
+        const detailsSections = [waitSnapshotHtml, queueStatusHtml, placeInfoHtml]
+            .filter((section) => typeof section === 'string' && section.trim().length > 0);
+        const detailsHtml = detailsSections.length > 0
+            ? detailsSections.join('
+')
+            : '<p class="text-sm text-gray-500">אין עדיין פרטים נוספים להצגה למיקום זה.</p>';
+
+        const relativeHtml = relativeLabel
+            ? `<p class="text-xs text-gray-500">נשמר לפני ${escapeHtml(relativeLabel)}</p>`
+            : '';
+
+        const cardClasses = [
+            'bg-white',
+            'p-4',
+            'rounded-lg',
+            'shadow-md',
+            'border',
+            'transition',
+            'focus:outline-none',
+            'focus:ring-2',
+            'focus:ring-blue-500'
+        ];
+        if (canOpenLocation) {
+            cardClasses.push('cursor-pointer');
+        }
 
         const el = document.createElement('div');
-        el.className = "bg-white p-4 rounded-lg shadow-md border transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500";
+        el.className = cardClasses.join(' ');
         el.setAttribute('tabindex', '0');
         el.setAttribute('role', 'button');
         el.innerHTML = `
             <div class="flex flex-col gap-3">
                 <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                     <div class="space-y-2">
-                        <h3 class="font-semibold text-lg text-gray-800">${data.name}</h3>
-                        <p class="text-sm text-gray-600">זמן המתנה ממוצע: <span class="font-medium text-blue-600">${avgTimeDisplay}</span></p>
-                        <p class="text-sm text-gray-600">סה"כ צ'ק-אינים: <span class="font-medium text-blue-600">${data.totalCheckIns}</span></p>
+                        <h3 class="font-semibold text-lg text-gray-800">${escapeHtml(locationName)}</h3>
+                        <p class="text-sm text-gray-600">זמן ההמתנה שלך: <span class="font-medium text-blue-600">${escapeHtml(waitLabel)}</span></p>
+                        ${partyHtml}
+                        <p class="text-xs text-gray-500">הושלם ב-${escapeHtml(completedLabel)}</p>
+                        ${relativeHtml}
                     </div>
-                    <div class="flex items-center gap-2 self-start">
-                        <button class="intel-details-btn text-sm font-semibold rounded-md px-3 py-2 transition ${hasIntel ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}" ${hasIntel ? '' : 'disabled'}>
-                            סקירת יעד
-                        </button>
-                        <button class="toggle-details-btn text-sm bg-gray-100 text-gray-700 font-semibold py-2 px-3 rounded-md hover:bg-gray-200 transition" aria-expanded="false">
-                            הצג פרטים
-                        </button>
-                        <button type="button" class="rename-location-btn text-sm bg-amber-100 text-amber-700 font-semibold py-2 px-3 rounded-md hover:bg-amber-200 transition">
-                            שינוי שם
-                        </button>
-                        <button class="goto-location-btn text-sm bg-blue-100 text-blue-700 font-semibold py-2 px-3 rounded-md hover:bg-blue-200 transition">
-                            עבור למיקום
-                        </button>
+                    <div class="flex items-center gap-2 self-start flex-wrap">
+                        ${intelButtonHtml}
+                        <button class="toggle-details-btn text-sm bg-gray-100 text-gray-700 font-semibold py-2 px-3 rounded-md hover:bg-gray-200 transition" aria-expanded="false">הצג פרטים</button>
+                        ${renameButtonHtml}
+                        <button class="${gotoButtonClass}" ${gotoButtonAttrs}>עבור למיקום</button>
                     </div>
                 </div>
-                <div class="location-details hidden space-y-3">
-                    <p class="text-xs text-gray-500">שעה נוכחית (${currentDayLabel} · ${formatHourLabel(hourIndex)}): <span class="font-semibold text-blue-600">${currentHourStats.label}</span></p>
-                    <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
-                        <div class="flex items-center justify-between text-xs sm:text-sm text-blue-900 font-semibold">
-                            <span>היום לפי שעות</span>
-                            <span>${currentHourStats.hasData ? currentHourStats.label : 'אין נתונים לשעה זו'}</span>
-                        </div>
-                        ${hourlyChartHtml}
-                    </div>
-                    <div>
-                        <h4 class="text-sm font-semibold text-gray-700">מבט שבועי</h4>
-                        ${weeklySummaryHtml}
-                    </div>
+                <div class="recent-visit-details hidden space-y-3">
+                    ${detailsHtml}
                 </div>
             </div>
         `;
 
         const openLocation = () => {
-            const coords = data.coords || {};
-            const lat = coords.lat ?? coords.latitude;
-            const lon = coords.lon ?? coords.lng ?? coords.longitude;
-            if (lat == null || lon == null) return;
-            selectLocation(lat, lon, data.name, id);
+            if (!canOpenLocation) {
+                return;
+            }
+            const latNum = Number(lat);
+            const lonNum = Number(lon);
+            if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
+                return;
+            }
+            selectLocation(latNum, lonNum, locationName, locationId || null);
         };
 
         el.addEventListener('click', (event) => {
@@ -3586,14 +4159,14 @@ function renderAllLocations() {
             if (event.target.closest('button')) {
                 return;
             }
-            if (event.key === 'Enter' || event.key === ' ') {
+            if ((event.key === 'Enter' || event.key === ' ') && canOpenLocation) {
                 event.preventDefault();
                 openLocation();
             }
         });
 
         const gotoBtn = el.querySelector('.goto-location-btn');
-        if (gotoBtn) {
+        if (gotoBtn && canOpenLocation) {
             gotoBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
                 openLocation();
@@ -3604,19 +4177,19 @@ function renderAllLocations() {
         if (intelBtn && hasIntel) {
             intelBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
-                openIntelModal({ ...data, id });
+                openIntelModal({ ...locationData, id: locationId || locationData?.id });
             });
         }
 
         const renameBtn = el.querySelector('.rename-location-btn');
-        if (renameBtn) {
+        if (renameBtn && locationId) {
             renameBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
-                openRenameLocationModal(id);
+                openRenameLocationModal(locationId);
             });
         }
 
-        const detailsEl = el.querySelector('.location-details');
+        const detailsEl = el.querySelector('.recent-visit-details');
         const toggleBtn = el.querySelector('.toggle-details-btn');
         if (detailsEl && toggleBtn) {
             const setExpanded = (expanded) => {
@@ -3640,11 +4213,10 @@ function renderAllLocations() {
             });
         }
 
-        allLocationsList.appendChild(el);
+        recentVisitsList.appendChild(el);
         animateLiveCard(el);
     }
 }
-
 function setWaitingScreenSavingState(isSaving) {
     isSavingCheckIn = isSaving;
 
@@ -3669,6 +4241,7 @@ function setWaitingScreenSavingState(isSaving) {
         denyArrivalBtn.disabled = isSaving;
     }
 
+    setPartySizeButtonsDisabled(isSaving);
     setWaitingSyncIndicatorActive(isSaving);
     updateState();
 }
