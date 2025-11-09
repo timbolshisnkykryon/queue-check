@@ -1,4 +1,8 @@
 import { strict as assert } from 'node:assert';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
     MAX_VISIT_HISTORY,
     sanitizeCoords,
@@ -6,6 +10,51 @@ import {
     normalizeLocationRecord,
     prepareCheckInUpdate
 } from '../app/location-model.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = join(__dirname, '..');
+
+function collectProjectJsFiles() {
+    const results = [];
+
+    function walk(dir) {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                walk(fullPath);
+            } else if (entry.isFile() && fullPath.endsWith('.js')) {
+                results.push(fullPath);
+            }
+        }
+    }
+
+    walk(join(PROJECT_ROOT, 'app'));
+
+    ['sw.js', 'firebase-config.js'].forEach((name) => {
+        const candidate = join(PROJECT_ROOT, name);
+        if (existsSync(candidate) && statSync(candidate).isFile()) {
+            results.push(candidate);
+        }
+    });
+
+    return results;
+}
+
+function testProjectSourcesParse() {
+    const files = collectProjectJsFiles();
+
+    files.forEach((file) => {
+        try {
+            execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+        } catch (error) {
+            const relPath = relative(PROJECT_ROOT, file);
+            const stderr = error.stderr?.toString() ?? error.message;
+            throw new Error(`Syntax check failed for ${relPath}: ${stderr.trim()}`);
+        }
+    });
+
+}
 
 function testSanitizeCoords() {
     assert.equal(sanitizeCoords(null), null, 'null coords should return null');
@@ -133,6 +182,7 @@ function testPrepareCheckInUpdateHistoryLimit() {
 
 function runTests() {
     const tests = [
+        testProjectSourcesParse,
         testSanitizeCoords,
         testNormalizeVisitEntry,
         testNormalizeLocationRecord,
