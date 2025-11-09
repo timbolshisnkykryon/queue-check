@@ -361,24 +361,28 @@ export function initializeApplication(context) {
         const queueSnapshot = computeRecentGroupQueueSnapshot(visits, normalizedKey);
         const groupsAhead = Math.max(0, Number(queueSnapshot?.groups) || 0);
         const peopleAhead = Math.max(0, Number(queueSnapshot?.people) || 0);
-        const position = groupsAhead + 1;
 
-        waitingGroupPositionValue.textContent = `מקום ${position}`;
-
-        let aheadText;
-        if (groupsAhead > 0) {
-            const groupLabel = groupsAhead === 1 ? 'קבוצה אחת' : `${groupsAhead} קבוצות`;
-            const peopleLabel = peopleAhead > 0 ? ` · כ-${peopleAhead} אנשים` : '';
-            aheadText = `${groupLabel} בגודל ${category.rangeLabel} ממתינות לפניכם${peopleLabel}`;
+        let valueLabel;
+        if (groupsAhead === 0) {
+            valueLabel = '0 קבוצות לפניכם';
+        } else if (groupsAhead === 1) {
+            valueLabel = 'קבוצה אחת לפניכם';
         } else {
-            aheadText = `אין כרגע קבוצות בגודל ${category.rangeLabel} לפניכם בתור`;
+            valueLabel = `${groupsAhead} קבוצות לפניכם`;
         }
+
+        waitingGroupPositionValue.textContent = valueLabel;
 
         const updateText = queueSnapshot?.updatedAt
             ? `עודכן לפני ${formatRelativeTimeFromNow(queueSnapshot.updatedAt)}.`
             : 'נעדכן בזמן אמת אחרי צ׳ק-אין חדש.';
 
-        waitingGroupPositionHint.textContent = `${aheadText}. ${updateText}`;
+        if (groupsAhead > 0) {
+            const peopleLabel = peopleAhead > 0 ? ` · כ-${peopleAhead} אנשים` : '';
+            waitingGroupPositionHint.textContent = `קבוצות בגודל ${category.rangeLabel} שכבר בצ'ק-אין לפניכם${peopleLabel}. ${updateText}`;
+        } else {
+            waitingGroupPositionHint.textContent = `אין כרגע קבוצות בגודל ${category.rangeLabel} שממתינות לפניכם. ${updateText}`;
+        }
     }
 
     function setSelectedPartySizeKey(newKey) {
@@ -3017,8 +3021,6 @@ function showLocationCard(name, id) {
         maxLength: 240
     });
     const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
-    const queueStatusSection = renderQueueStatusSection(locationData.visits);
-    const waitSnapshotHtml = renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts);
     const waitGroupsHtml = renderWaitGroupsSection(stats.waitGroupCounts, latestVisit);
     const intelSubtitle = hasIntel
         ? 'תובנות בזמן אמת לחוויה חלקה'
@@ -3054,9 +3056,7 @@ function showLocationCard(name, id) {
                 </div>
             </header>
             ${placeInfoHtml}
-            ${queueStatusSection}
             ${waitGroupsHtml}
-            ${waitSnapshotHtml}
             ${intelSection}
             <div class="location-card__actions">
                 <button type="button" class="location-card__checkin-btn">צ'ק-אין למקום</button>

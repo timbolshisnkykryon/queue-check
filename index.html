@@ -2264,27 +2264,6 @@
 
             <!-- Status & Intel -->
             <div class="w-full max-w-md space-y-4">
-                <div id="party-size-selector" class="party-size-selector" aria-live="polite">
-                    <p class="party-size-selector__title">עם כמה אנשים הגעתם היום?</p>
-                    <div id="party-size-options" class="party-size-options" role="radiogroup" aria-label="בחירת גודל קבוצה">
-                        <button type="button" class="party-size-card party-size-card--small" data-party-key="small" role="radio" aria-checked="false">
-                            <span class="party-size-card__emoji" aria-hidden="true">👥</span>
-                            <span class="party-size-card__range">1-3</span>
-                            <span class="party-size-card__label">קבוצה קטנה</span>
-                        </button>
-                        <button type="button" class="party-size-card party-size-card--medium" data-party-key="medium" role="radio" aria-checked="false">
-                            <span class="party-size-card__emoji" aria-hidden="true">👨‍👩‍👧</span>
-                            <span class="party-size-card__range">4-6</span>
-                            <span class="party-size-card__label">קבוצה בינונית</span>
-                        </button>
-                        <button type="button" class="party-size-card party-size-card--large" data-party-key="large" role="radio" aria-checked="false">
-                            <span class="party-size-card__emoji" aria-hidden="true">🎉</span>
-                            <span class="party-size-card__range">7+</span>
-                            <span class="party-size-card__label">קבוצה גדולה</span>
-                        </button>
-                    </div>
-                </div>
-
                 <!-- Status Grid -->
                 <div class="grid grid-cols-2 gap-4">
                     <div class="bg-white bg-opacity-10 p-4 rounded-lg text-center">
@@ -2301,14 +2280,14 @@
                 <!-- Group Insights -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="bg-white bg-opacity-10 p-4 rounded-lg text-center">
-                        <div class="text-sm uppercase text-blue-200 mb-1">ממוצע ההמתנה לקבוצה שלך</div>
+                        <div class="text-sm uppercase text-blue-200 mb-1">ממוצע ההמתנה לשעה הזו</div>
                         <div id="waiting-group-average-value" class="text-2xl font-semibold">אין נתונים</div>
                         <p id="waiting-group-average-hint" class="text-xs text-blue-100 mt-1">נעדכן ברגע שיגיעו דיווחים מתאימים.</p>
                     </div>
                     <div class="bg-white bg-opacity-10 p-4 rounded-lg text-center">
-                        <div class="text-sm uppercase text-blue-200 mb-1">המיקום שלך בתור</div>
-                        <div id="waiting-group-position-value" class="text-2xl font-semibold">מקום 1</div>
-                        <p id="waiting-group-position-hint" class="text-xs text-blue-100 mt-1">אין כרגע קבוצות לפניכם בתור.</p>
+                        <div class="text-sm uppercase text-blue-200 mb-1">קבוצות בגודל שלך שממתינות עכשיו</div>
+                        <div id="waiting-group-position-value" class="text-2xl font-semibold">0 קבוצות לפניכם</div>
+                        <p id="waiting-group-position-hint" class="text-xs text-blue-100 mt-1">אין כרגע קבוצות בגודל שלך שממתינות. נעדכן בזמן אמת.</p>
                     </div>
                 </div>
 
