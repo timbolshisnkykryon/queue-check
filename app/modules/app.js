@@ -11,6 +11,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
     MAX_VISIT_HISTORY,
+    normalizeLiveQueueRecord,
     normalizeLocationRecord,
     prepareCheckInUpdate,
     sanitizeCoords
@@ -65,6 +66,12 @@ export function initializeApplication(context) {
         selectedPlaceInfo,
         isSavingCheckIn,
         selectedPartySizeKey,
+        pendingPartySizeSelectionKey,
+        isPartySizePromptOpen,
+        activeWaitSessionId,
+        activeWaitLocationId,
+        activeWaitPartyKey,
+        activeWaitRegisteredAt,
         liveStatusTimeoutId,
         waitingSyncHideTimeoutId,
         renameLocationPendingId,
@@ -113,6 +120,10 @@ export function initializeApplication(context) {
         waitingGroupPositionHint,
         partySizeSelector,
         partySizeOptionButtons,
+        partySizePrompt,
+        partySizePromptOptionButtons,
+        partySizePromptConfirmBtn,
+        partySizePromptCancelBtn,
         miniMapEl,
         infoLoading,
         infoResult,
@@ -166,9 +177,15 @@ export function initializeApplication(context) {
     let nearbyPanelMobileQuery = null;
 
     const partySizeButtons = Array.isArray(partySizeOptionButtons) ? partySizeOptionButtons : [];
+    const partySizePromptButtons = Array.isArray(partySizePromptOptionButtons) ? partySizePromptOptionButtons : [];
+    let partySizePromptResolver = null;
+
 
     const RECENT_VISITS_STORAGE_KEY = 'tfosMakomRecentVisits';
     const MAX_RECENT_VISITS = 20;
+    const ACTIVE_WAIT_SESSION_STORAGE_KEY = 'tfosMakomActiveWaitSession';
+    const LIVE_QUEUE_STALE_MINUTES = 45;
+    const LIVE_QUEUE_ENTRY_STALE_MINUTES = 240;
 
     recentVisits = normalizeRecentVisitsArray(
         Array.isArray(recentVisits) && recentVisits.length > 0
@@ -176,6 +193,77 @@ export function initializeApplication(context) {
             : loadRecentVisitsFromStorage()
     );
     persistRecentVisits(recentVisits);
+
+    function loadActiveWaitSessionFromStorage() {
+        try {
+            const raw = localStorage.getItem(ACTIVE_WAIT_SESSION_STORAGE_KEY);
+            if (!raw) {
+                return null;
+            }
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') {
+                return null;
+            }
+
+            const sessionId = typeof parsed.sessionId === 'string' ? parsed.sessionId.trim() : '';
+            const locationId = typeof parsed.locationId === 'string' ? parsed.locationId.trim() : '';
+            const partyKey = typeof parsed.partyKey === 'string' ? parsed.partyKey.trim().toLowerCase() : '';
+            const allowedKeys = ['small', 'medium', 'large'];
+            const normalizedPartyKey = allowedKeys.includes(partyKey) ? partyKey : 'small';
+            const enteredAt = typeof parsed.enteredAt === 'string' ? parsed.enteredAt : null;
+
+            if (!sessionId || !locationId) {
+                return null;
+            }
+
+            return {
+                sessionId,
+                locationId,
+                partyKey: normalizedPartyKey,
+                enteredAt
+            };
+        } catch (error) {
+            console.warn('Failed to load active wait session from storage', error);
+            return null;
+        }
+    }
+
+    function persistActiveWaitSession(session) {
+        try {
+            if (!session) {
+                localStorage.removeItem(ACTIVE_WAIT_SESSION_STORAGE_KEY);
+                return;
+            }
+
+            const allowedKeys = ['small', 'medium', 'large'];
+            const normalizedPartyKey = allowedKeys.includes((session.partyKey || '').toLowerCase())
+                ? session.partyKey.toLowerCase()
+                : 'small';
+
+            const payload = {
+                sessionId: session.sessionId,
+                locationId: session.locationId,
+                partyKey: normalizedPartyKey,
+                enteredAt: session.enteredAt instanceof Date
+                    ? session.enteredAt.toISOString()
+                    : (typeof session.enteredAt === 'string' ? session.enteredAt : null)
+            };
+
+            localStorage.setItem(ACTIVE_WAIT_SESSION_STORAGE_KEY, JSON.stringify(payload));
+        } catch (error) {
+            console.warn('Failed to persist active wait session', error);
+        }
+    }
+
+    function clearActiveWaitSessionStorage() {
+        try {
+            localStorage.removeItem(ACTIVE_WAIT_SESSION_STORAGE_KEY);
+        } catch (error) {
+            console.warn('Failed to clear active wait session storage', error);
+        }
+    }
+
+    let orphanedWaitSession = loadActiveWaitSessionFromStorage();
 
     function normalizePartySizeKey(key) {
         const normalized = typeof key === 'string' ? key.trim().toLowerCase() : '';
@@ -216,6 +304,180 @@ export function initializeApplication(context) {
         });
     }
 
+    function updatePartySizePromptSelectionUI() {
+        if (!partySizePromptButtons.length) {
+            if (partySizePromptConfirmBtn) {
+                partySizePromptConfirmBtn.disabled = false;
+            }
+            return;
+        }
+
+        const normalizedKey = normalizePartySizeKey(pendingPartySizeSelectionKey || selectedPartySizeKey);
+
+        partySizePromptButtons.forEach((button) => {
+            if (!(button instanceof HTMLElement)) return;
+            const key = normalizePartySizeKey(button.dataset.partyKey);
+            const isActive = key === normalizedKey;
+            button.classList.toggle('is-active', isActive);
+            button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+            button.setAttribute('tabindex', isActive ? '0' : '-1');
+        });
+
+        if (partySizePromptConfirmBtn) {
+            partySizePromptConfirmBtn.disabled = !normalizedKey;
+        }
+    }
+
+    function setPendingPartySizeSelectionKey(newKey) {
+        pendingPartySizeSelectionKey = normalizePartySizeKey(newKey || pendingPartySizeSelectionKey || selectedPartySizeKey);
+        updatePartySizePromptSelectionUI();
+        updateState();
+    }
+
+    function openPartySizePrompt(defaultKey) {
+        if (!partySizePrompt) {
+            return;
+        }
+
+        pendingPartySizeSelectionKey = normalizePartySizeKey(defaultKey || pendingPartySizeSelectionKey || selectedPartySizeKey);
+        updatePartySizePromptSelectionUI();
+
+        isPartySizePromptOpen = true;
+        partySizePrompt.setAttribute('aria-hidden', 'false');
+        partySizePrompt.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+
+        const focusTarget = partySizePromptButtons.find((button) => {
+            const key = normalizePartySizeKey(button?.dataset?.partyKey);
+            return key === pendingPartySizeSelectionKey;
+        }) || partySizePromptButtons[0] || partySizePromptConfirmBtn;
+
+        if (focusTarget && typeof focusTarget.focus === 'function') {
+            focusTarget.focus({ preventScroll: true });
+        }
+
+        updateState();
+    }
+
+    function closePartySizePrompt() {
+        if (!partySizePrompt) {
+            return;
+        }
+
+        partySizePrompt.setAttribute('aria-hidden', 'true');
+        partySizePrompt.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+        isPartySizePromptOpen = false;
+        updateState();
+    }
+
+    function resolvePartySizePrompt(result) {
+        const resolver = partySizePromptResolver;
+        partySizePromptResolver = null;
+        closePartySizePrompt();
+        if (typeof resolver === 'function') {
+            resolver(result);
+        }
+    }
+
+    function promptForPartySize(defaultKey = 'small') {
+        const normalizedDefault = normalizePartySizeKey(defaultKey);
+
+        if (!partySizePrompt) {
+            return Promise.resolve(normalizedDefault);
+        }
+
+        if (typeof partySizePromptResolver === 'function') {
+            const resolver = partySizePromptResolver;
+            partySizePromptResolver = null;
+            resolver(null);
+        }
+
+        if (isPartySizePromptOpen) {
+            closePartySizePrompt();
+        }
+
+        openPartySizePrompt(normalizedDefault);
+
+        return new Promise((resolve) => {
+            partySizePromptResolver = resolve;
+        });
+    }
+
+    function calculateGroupsAhead(liveQueueRecord, partyKey, sessionId, registeredAt) {
+        const normalizedKey = normalizePartySizeKey(partyKey);
+        const fallbackSize = WAIT_GROUP_CATEGORY_METADATA[normalizedKey]?.estimate || 0;
+        const entries = Array.isArray(liveQueueRecord?.entries) ? liveQueueRecord.entries : [];
+        const now = Date.now();
+        const entryStaleThreshold = now - LIVE_QUEUE_ENTRY_STALE_MINUTES * 60 * 1000;
+
+        const normalizedEntries = entries
+            .filter((entry) => entry && normalizePartySizeKey(entry.category) === normalizedKey)
+            .map((entry) => {
+                const sizeCandidate = Number(entry.size);
+                const size = Number.isFinite(sizeCandidate) && sizeCandidate > 0 ? sizeCandidate : fallbackSize;
+                const enteredAt = entry?.enteredAt ? new Date(entry.enteredAt) : null;
+                return {
+                    id: typeof entry?.id === 'string' ? entry.id : '',
+                    size,
+                    enteredAt
+                };
+            })
+            .filter((entry) => entry.id && (!entry.enteredAt || entry.enteredAt.getTime() >= entryStaleThreshold));
+
+        if (sessionId && registeredAt && !normalizedEntries.some((entry) => entry.id === sessionId)) {
+            const registeredDate = registeredAt instanceof Date ? registeredAt : new Date(registeredAt);
+            if (!Number.isNaN(registeredDate.getTime())) {
+                normalizedEntries.push({
+                    id: sessionId,
+                    size: fallbackSize,
+                    enteredAt: registeredDate,
+                    isLocal: true
+                });
+            }
+        }
+
+        normalizedEntries.sort((a, b) => {
+            const aTime = a.enteredAt ? a.enteredAt.getTime() : 0;
+            const bTime = b.enteredAt ? b.enteredAt.getTime() : 0;
+            return aTime - bTime;
+        });
+
+        let groupsAhead = 0;
+        let peopleAhead = 0;
+        let sawSelf = false;
+
+        for (const entry of normalizedEntries) {
+            if (sessionId && entry.id === sessionId) {
+                sawSelf = true;
+                break;
+            }
+            groupsAhead += 1;
+            peopleAhead += entry.size;
+        }
+
+        if (sessionId && !sawSelf) {
+            groupsAhead = normalizedEntries.length;
+            peopleAhead = normalizedEntries.reduce((sum, entry) => sum + entry.size, 0);
+        }
+
+        const updatedAt = normalizedEntries.reduce((latest, entry) => {
+            if (!entry.enteredAt) {
+                return latest;
+            }
+            if (!latest || entry.enteredAt > latest) {
+                return entry.enteredAt;
+            }
+            return latest;
+        }, liveQueueRecord?.updatedAt ? new Date(liveQueueRecord.updatedAt) : null);
+
+        return {
+            groupsAhead,
+            peopleAhead,
+            updatedAt
+        };
+    }
+
     function updateWaitingPartyInsights() {
         if (
             !waitingGroupAverageValue ||
@@ -230,7 +492,7 @@ export function initializeApplication(context) {
         const category = WAIT_GROUP_CATEGORY_METADATA[normalizedKey] || WAIT_GROUP_CATEGORY_METADATA.small;
         const locationData = currentLocationId ? getLocationFromCache(currentLocationId) : null;
         const visits = Array.isArray(locationData?.visits) ? locationData.visits : [];
-        const stats = computeLocationStats(visits);
+        const stats = computeLocationStats(visits, { liveQueue: locationData?.liveQueue });
         const { dayIndex, hourIndex } = getCurrentTimeContext();
 
         let averageSeconds = null;
@@ -249,32 +511,47 @@ export function initializeApplication(context) {
             waitingGroupAverageHint.textContent = 'נעדכן ברגע שיגיעו דיווחים לשעה ולגודל קבוצה זה.';
         }
 
-        const queueSnapshot = computeRecentGroupQueueSnapshot(visits, normalizedKey);
-        const groupsAhead = Math.max(0, Number(queueSnapshot?.groups) || 0);
-        const peopleAhead = Math.max(0, Number(queueSnapshot?.people) || 0);
-        const position = groupsAhead + 1;
+        const sessionMatchesLocation = activeWaitLocationId && activeWaitLocationId === currentLocationId;
+        const sessionId = sessionMatchesLocation ? activeWaitSessionId : null;
+        const sessionRegisteredAt = sessionMatchesLocation ? activeWaitRegisteredAt : null;
+        const liveQueueRecord = normalizeLiveQueueRecord(locationData?.liveQueue);
+        const { groupsAhead, peopleAhead, updatedAt: queueUpdatedAt } = calculateGroupsAhead(
+            liveQueueRecord,
+            normalizedKey,
+            sessionId,
+            sessionRegisteredAt
+        );
 
-        waitingGroupPositionValue.textContent = `מקום ${position}`;
+        const roundedPeopleAhead = Math.max(0, Math.round(peopleAhead));
 
-        let aheadText;
-        if (groupsAhead > 0) {
-            const groupLabel = groupsAhead === 1 ? 'קבוצה אחת' : `${groupsAhead} קבוצות`;
-            const peopleLabel = peopleAhead > 0 ? ` · כ-${peopleAhead} אנשים` : '';
-            aheadText = `${groupLabel} בגודל ${category.rangeLabel} ממתינות לפניכם${peopleLabel}`;
+        let valueLabel;
+        if (groupsAhead === 0) {
+            valueLabel = '0 קבוצות לפניכם';
+        } else if (groupsAhead === 1) {
+            valueLabel = 'קבוצה אחת לפניכם';
         } else {
-            aheadText = `אין כרגע קבוצות בגודל ${category.rangeLabel} לפניכם בתור`;
+            valueLabel = `${groupsAhead} קבוצות לפניכם`;
         }
 
-        const updateText = queueSnapshot?.updatedAt
-            ? `עודכן לפני ${formatRelativeTimeFromNow(queueSnapshot.updatedAt)}.`
+        waitingGroupPositionValue.textContent = valueLabel;
+
+        const updateText = queueUpdatedAt instanceof Date
+            ? `עודכן לפני ${formatRelativeTimeFromNow(queueUpdatedAt)}.`
             : 'נעדכן בזמן אמת אחרי צ׳ק-אין חדש.';
 
-        waitingGroupPositionHint.textContent = `${aheadText}. ${updateText}`;
+        if (groupsAhead > 0) {
+            const peopleLabel = roundedPeopleAhead > 0 ? ` · כ-${roundedPeopleAhead} אנשים` : '';
+            waitingGroupPositionHint.textContent = `קבוצות בגודל ${category.rangeLabel} שכבר בצ'ק-אין לפניכם${peopleLabel}. ${updateText}`;
+        } else {
+            waitingGroupPositionHint.textContent = `אין כרגע קבוצות בגודל ${category.rangeLabel} שממתינות לפניכם. ${updateText}`;
+        }
     }
 
     function setSelectedPartySizeKey(newKey) {
         selectedPartySizeKey = normalizePartySizeKey(newKey || selectedPartySizeKey);
+        pendingPartySizeSelectionKey = selectedPartySizeKey;
         updatePartySizeSelectionUI();
+        updatePartySizePromptSelectionUI();
         updateWaitingPartyInsights();
         updateState();
     }
@@ -339,6 +616,12 @@ export function initializeApplication(context) {
             selectedPlaceInfo,
             isSavingCheckIn,
             selectedPartySizeKey,
+            pendingPartySizeSelectionKey,
+            isPartySizePromptOpen,
+            activeWaitSessionId,
+            activeWaitLocationId,
+            activeWaitPartyKey,
+            activeWaitRegisteredAt,
             liveStatusTimeoutId,
             waitingSyncHideTimeoutId,
             renameLocationPendingId,
@@ -1137,6 +1420,75 @@ async function initApp() {
         setSelectedPartySizeKey(selectedPartySizeKey);
     }
 
+    if (partySizePromptButtons.length) {
+        partySizePromptButtons.forEach((button, index) => {
+            if (!(button instanceof HTMLButtonElement)) return;
+
+            button.addEventListener('click', () => {
+                const key = button.dataset.partyKey;
+                setPendingPartySizeSelectionKey(key);
+            });
+
+            button.addEventListener('keydown', (event) => {
+                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    const nextIndex = (index + 1) % partySizePromptButtons.length;
+                    partySizePromptButtons[nextIndex]?.focus?.();
+                    const key = partySizePromptButtons[nextIndex]?.dataset?.partyKey;
+                    if (key) {
+                        setPendingPartySizeSelectionKey(key);
+                    }
+                } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    const nextIndex = (index - 1 + partySizePromptButtons.length) % partySizePromptButtons.length;
+                    partySizePromptButtons[nextIndex]?.focus?.();
+                    const key = partySizePromptButtons[nextIndex]?.dataset?.partyKey;
+                    if (key) {
+                        setPendingPartySizeSelectionKey(key);
+                    }
+                } else if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    const key = button.dataset.partyKey;
+                    setPendingPartySizeSelectionKey(key);
+                    if (partySizePromptConfirmBtn && !partySizePromptConfirmBtn.disabled) {
+                        partySizePromptConfirmBtn.click();
+                    }
+                }
+            });
+        });
+    }
+
+    if (partySizePromptConfirmBtn) {
+        partySizePromptConfirmBtn.addEventListener('click', () => {
+            if (partySizePromptConfirmBtn.disabled) {
+                return;
+            }
+            const normalized = normalizePartySizeKey(pendingPartySizeSelectionKey || selectedPartySizeKey || 'small');
+            resolvePartySizePrompt(normalized);
+        });
+    }
+
+    if (partySizePromptCancelBtn) {
+        partySizePromptCancelBtn.addEventListener('click', () => {
+            resolvePartySizePrompt(null);
+        });
+    }
+
+    if (partySizePrompt) {
+        partySizePrompt.addEventListener('click', (event) => {
+            if (event.target === partySizePrompt) {
+                resolvePartySizePrompt(null);
+            }
+        });
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && isPartySizePromptOpen) {
+            event.preventDefault();
+            resolvePartySizePrompt(null);
+        }
+    });
+
     cancelCheckInBtn.addEventListener('click', () => { void finishCheckIn(false); }); // Don't save
     manualFinishBtn.addEventListener('click', () => { void finishCheckIn(true); }); // Save
     closeSuccessBtn.addEventListener('click', () => successMessage.classList.add('hidden'));
@@ -1238,32 +1590,390 @@ window.switchTab = function(tabName) {
 }
 
 // --- Firebase Integration ---
-async function initializeFirebase() {
-    if (!firebaseConfig) {
-        firebaseInitializationError = new Error('חסרה תצורת Firebase.');
-        locationsLoaded = true;
-        renderRecentVisits();
+    async function initializeFirebase() {
+        if (!firebaseConfig) {
+            firebaseInitializationError = new Error('חסרה תצורת Firebase.');
+            locationsLoaded = true;
+            renderRecentVisits();
+            updateState();
+            return;
+        }
+
+        if (firebaseAppInstance) {
+            if (orphanedWaitSession && orphanedWaitSession.locationId && orphanedWaitSession.sessionId && firestoreDb) {
+                void releaseLiveQueueEntry(orphanedWaitSession.locationId, orphanedWaitSession.sessionId, {
+                    silent: true,
+                    keepState: true
+                });
+                orphanedWaitSession = null;
+                clearActiveWaitSessionStorage();
+            }
+
+            updateState();
+            return;
+        }
+
+        try {
+            firebaseAppInstance = initializeApp(firebaseConfig);
+            firestoreDb = getFirestore(firebaseAppInstance);
+            subscribeToLocations();
+
+            if (orphanedWaitSession && orphanedWaitSession.locationId && orphanedWaitSession.sessionId) {
+                void releaseLiveQueueEntry(orphanedWaitSession.locationId, orphanedWaitSession.sessionId, {
+                    silent: true,
+                    keepState: true
+                });
+                orphanedWaitSession = null;
+                clearActiveWaitSessionStorage();
+            }
+        } catch (error) {
+            firebaseInitializationError = error;
+            console.error('Failed to initialize Firebase', error);
+            renderRecentVisits();
+        }
+
         updateState();
-        return;
     }
 
-    if (firebaseAppInstance) {
-        updateState();
-        return;
+    function generateWaitSessionId() {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
+        return `wait_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     }
 
-    try {
-        firebaseAppInstance = initializeApp(firebaseConfig);
-        firestoreDb = getFirestore(firebaseAppInstance);
-        subscribeToLocations();
-    } catch (error) {
-        firebaseInitializationError = error;
-        console.error('Failed to initialize Firebase', error);
-        renderRecentVisits();
+    function applyLiveQueueEntriesToCache(locationId, entries, updatedAt, options = {}) {
+        if (!locationId) {
+            return;
+        }
+
+        const cached = getLocationFromCache(locationId);
+        const baseData = cached || options.baseData;
+
+        if (!baseData) {
+            return;
+        }
+
+        const normalizedUpdatedAt = updatedAt instanceof Date
+            ? updatedAt.toISOString()
+            : (typeof updatedAt === 'string' ? updatedAt : null);
+
+        const sanitizedEntries = Array.isArray(entries)
+            ? entries
+                .map((entry) => {
+                    const id = typeof entry?.id === 'string' ? entry.id : '';
+                    const category = normalizePartySizeKey(entry?.category || entry?.partyKey);
+                    if (!id || !category) {
+                        return null;
+                    }
+
+                    const sizeCandidate = Number(entry?.size);
+                    const size = Number.isFinite(sizeCandidate) && sizeCandidate > 0
+                        ? sizeCandidate
+                        : (WAIT_GROUP_CATEGORY_METADATA[category]?.estimate || 0);
+
+                    const enteredAt = entry?.enteredAt instanceof Date
+                        ? entry.enteredAt.toISOString()
+                        : (typeof entry?.enteredAt === 'string' ? entry.enteredAt : null);
+
+                    return {
+                        id,
+                        category,
+                        size,
+                        enteredAt
+                    };
+                })
+                .filter(Boolean)
+            : [];
+
+        const liveQueuePayload = {
+            version: 1,
+            updatedAt: normalizedUpdatedAt,
+            entries: sanitizedEntries
+        };
+
+        upsertLocationInCache(locationId, {
+            ...baseData,
+            liveQueue: liveQueuePayload
+        });
     }
 
-    updateState();
-}
+    async function mutateLiveQueue(locationId, mutator, options = {}) {
+        if (!firestoreDb || !locationId || typeof mutator !== 'function') {
+            return null;
+        }
+
+        const { baseData = null } = options;
+
+        const locationRef = doc(firestoreDb, FIRESTORE_LOCATIONS_COLLECTION, locationId);
+        let mutationResult = null;
+
+        await runTransaction(firestoreDb, async (transaction) => {
+            const snapshot = await transaction.get(locationRef);
+            const rawData = snapshot.exists() ? snapshot.data() : baseData || {};
+            const normalizedRecord = normalizeLocationRecord(locationId, rawData, { maxVisitHistory: MAX_VISIT_HISTORY });
+            const currentEntries = Array.isArray(normalizedRecord.liveQueue?.entries)
+                ? normalizedRecord.liveQueue.entries
+                : [];
+
+            const mutatedEntries = mutator(currentEntries, normalizedRecord);
+
+            if (!mutatedEntries) {
+                mutationResult = {
+                    entries: currentEntries,
+                    updatedAt: normalizedRecord.liveQueue?.updatedAt
+                        ? new Date(normalizedRecord.liveQueue.updatedAt)
+                        : null
+                };
+                return;
+            }
+
+            const sanitizedEntries = Array.isArray(mutatedEntries)
+                ? mutatedEntries
+                : (Array.isArray(mutatedEntries.entries) ? mutatedEntries.entries : []);
+
+            const uniqueMap = new Map();
+            for (const entry of sanitizedEntries) {
+                if (!entry) continue;
+
+                const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+                const category = normalizePartySizeKey(entry.category || entry.partyKey);
+                if (!id || !category) {
+                    continue;
+                }
+
+                const sizeCandidate = Number(entry.size);
+                const size = Number.isFinite(sizeCandidate) && sizeCandidate > 0
+                    ? sizeCandidate
+                    : (WAIT_GROUP_CATEGORY_METADATA[category]?.estimate || 0);
+
+                const enteredAtIso = entry.enteredAt instanceof Date
+                    ? entry.enteredAt.toISOString()
+                    : (typeof entry.enteredAt === 'string' ? entry.enteredAt : new Date().toISOString());
+
+                const key = `${category}:${id}`;
+                const existing = uniqueMap.get(key);
+                if (existing) {
+                    const existingTime = existing.enteredAt ? new Date(existing.enteredAt).getTime() : 0;
+                    const candidateTime = enteredAtIso ? new Date(enteredAtIso).getTime() : 0;
+                    if (candidateTime <= existingTime) {
+                        continue;
+                    }
+                }
+
+                uniqueMap.set(key, {
+                    id,
+                    category,
+                    size,
+                    enteredAt: enteredAtIso
+                });
+            }
+
+            const finalEntries = Array.from(uniqueMap.values()).sort((a, b) => {
+                const aTime = a.enteredAt ? new Date(a.enteredAt).getTime() : 0;
+                const bTime = b.enteredAt ? new Date(b.enteredAt).getTime() : 0;
+                return aTime - bTime;
+            });
+
+            transaction.set(locationRef, {
+                liveQueue: {
+                    version: 1,
+                    updatedAt: serverTimestamp(),
+                    entries: finalEntries
+                }
+            }, { merge: true });
+
+            mutationResult = {
+                entries: finalEntries,
+                updatedAt: new Date()
+            };
+        });
+
+        if (mutationResult) {
+            applyLiveQueueEntriesToCache(locationId, mutationResult.entries, mutationResult.updatedAt, { baseData });
+        }
+
+        return mutationResult;
+    }
+
+    async function registerLiveQueueEntry(locationId, partyKey, options = {}) {
+        if (!locationId) {
+            return null;
+        }
+
+        const normalizedKey = normalizePartySizeKey(partyKey);
+        const sessionId = typeof options.sessionId === 'string' && options.sessionId.trim().length > 0
+            ? options.sessionId.trim()
+            : generateWaitSessionId();
+        const now = new Date();
+        const sizeEstimate = Number.isFinite(Number(options.sizeEstimate)) && Number(options.sizeEstimate) > 0
+            ? Number(options.sizeEstimate)
+            : (WAIT_GROUP_CATEGORY_METADATA[normalizedKey]?.estimate || 0);
+
+        setWaitingSyncIndicatorActive(true);
+
+        try {
+            const result = await mutateLiveQueue(locationId, (currentEntries = []) => {
+                const nowMs = now.getTime();
+                const staleThreshold = nowMs - LIVE_QUEUE_ENTRY_STALE_MINUTES * 60 * 1000;
+                const nextEntries = [];
+                const seen = new Set();
+
+                for (const entry of currentEntries) {
+                    const entryId = typeof entry?.id === 'string' ? entry.id : '';
+                    const entryCategory = normalizePartySizeKey(entry?.category);
+                    if (!entryId || !entryCategory) {
+                        continue;
+                    }
+
+                    if (entryId === sessionId) {
+                        continue;
+                    }
+
+                    const enteredAtTime = entry?.enteredAt
+                        ? new Date(entry.enteredAt).getTime()
+                        : null;
+
+                    if (enteredAtTime && enteredAtTime < staleThreshold) {
+                        continue;
+                    }
+
+                    const uniqueKey = `${entryCategory}:${entryId}`;
+                    if (seen.has(uniqueKey)) {
+                        continue;
+                    }
+                    seen.add(uniqueKey);
+
+                    nextEntries.push({
+                        id: entryId,
+                        category: entryCategory,
+                        size: Number(entry?.size) > 0 ? Number(entry.size) : (WAIT_GROUP_CATEGORY_METADATA[entryCategory]?.estimate || 0),
+                        enteredAt: enteredAtTime ? new Date(enteredAtTime).toISOString() : now.toISOString()
+                    });
+                }
+
+                nextEntries.push({
+                    id: sessionId,
+                    category: normalizedKey,
+                    size: sizeEstimate,
+                    enteredAt: now.toISOString()
+                });
+
+                nextEntries.sort((a, b) => {
+                    const aTime = a.enteredAt ? new Date(a.enteredAt).getTime() : 0;
+                    const bTime = b.enteredAt ? new Date(b.enteredAt).getTime() : 0;
+                    return aTime - bTime;
+                });
+
+                return nextEntries;
+            }, {
+                baseData: options.baseData || null
+            });
+
+            activeWaitSessionId = sessionId;
+            activeWaitLocationId = locationId;
+            activeWaitPartyKey = normalizedKey;
+            activeWaitRegisteredAt = now;
+
+            persistActiveWaitSession({
+                sessionId,
+                locationId,
+                partyKey: normalizedKey,
+                enteredAt: now
+            });
+
+            updateWaitingPartyInsights();
+            updateState();
+
+            return result;
+        } catch (error) {
+            console.error('Failed to register live queue entry', error);
+            return null;
+        } finally {
+            setWaitingSyncIndicatorActive(false);
+        }
+    }
+
+    async function releaseLiveQueueEntry(locationId, sessionId, options = {}) {
+        if (!firestoreDb || !locationId || !sessionId) {
+            return null;
+        }
+
+        const { silent = false, keepState = false, baseData = null } = options;
+
+        if (!silent) {
+            setWaitingSyncIndicatorActive(true);
+        }
+
+        try {
+            const now = new Date();
+            const result = await mutateLiveQueue(locationId, (currentEntries = []) => {
+                const nowMs = now.getTime();
+                const staleThreshold = nowMs - LIVE_QUEUE_ENTRY_STALE_MINUTES * 60 * 1000;
+                const nextEntries = [];
+                const seen = new Set();
+
+                for (const entry of currentEntries) {
+                    const entryId = typeof entry?.id === 'string' ? entry.id : '';
+                    const entryCategory = normalizePartySizeKey(entry?.category);
+                    if (!entryId || !entryCategory) {
+                        continue;
+                    }
+
+                    if (entryId === sessionId) {
+                        continue;
+                    }
+
+                    const enteredAtTime = entry?.enteredAt
+                        ? new Date(entry.enteredAt).getTime()
+                        : null;
+
+                    if (enteredAtTime && enteredAtTime < staleThreshold) {
+                        continue;
+                    }
+
+                    const uniqueKey = `${entryCategory}:${entryId}`;
+                    if (seen.has(uniqueKey)) {
+                        continue;
+                    }
+                    seen.add(uniqueKey);
+
+                    nextEntries.push({
+                        id: entryId,
+                        category: entryCategory,
+                        size: Number(entry?.size) > 0 ? Number(entry.size) : (WAIT_GROUP_CATEGORY_METADATA[entryCategory]?.estimate || 0),
+                        enteredAt: enteredAtTime ? new Date(enteredAtTime).toISOString() : now.toISOString()
+                    });
+                }
+
+                return nextEntries;
+            }, { baseData });
+
+            if (!keepState) {
+                clearActiveWaitSessionStorage();
+
+                if (activeWaitSessionId === sessionId) {
+                    activeWaitSessionId = null;
+                    activeWaitLocationId = null;
+                    activeWaitPartyKey = selectedPartySizeKey || 'small';
+                    activeWaitRegisteredAt = null;
+                    updateWaitingPartyInsights();
+                    updateState();
+                }
+            }
+
+            return result;
+        } catch (error) {
+            if (!silent) {
+                console.error('Failed to release live queue entry', error);
+            }
+            return null;
+        } finally {
+            if (!silent) {
+                setWaitingSyncIndicatorActive(false);
+            }
+        }
+    }
 
 function subscribeToLocations() {
     if (!firestoreDb) return;
@@ -2464,53 +3174,6 @@ function computeRecentQueueSnapshot(visits, { windowMinutes = RECENT_CHECKIN_WIN
     };
 }
 
-function computeRecentGroupQueueSnapshot(visits, partyKey, { windowMinutes = RECENT_CHECKIN_WINDOW_MINUTES } = {}) {
-    const normalizedKey = normalizePartySizeKey(partyKey);
-    const safeVisits = Array.isArray(visits) ? visits : [];
-    const now = Date.now();
-    const windowMs = Math.max(1, Number(windowMinutes) || 0) * 60 * 1000;
-
-    let groups = 0;
-    let people = 0;
-    let latestTimestamp = null;
-
-    for (const visit of safeVisits) {
-        if (!visit) continue;
-
-        const timestamp = typeof visit.timestamp === 'string' ? visit.timestamp : null;
-        if (!timestamp) {
-            continue;
-        }
-
-        const visitTime = new Date(timestamp).getTime();
-        if (!Number.isFinite(visitTime)) {
-            continue;
-        }
-
-        if (windowMs > 0 && now - visitTime > windowMs) {
-            continue;
-        }
-
-        const partyInfo = resolveVisitPartyInfo(visit);
-        if (!partyInfo || partyInfo.key !== normalizedKey) {
-            continue;
-        }
-
-        groups += 1;
-        people += Math.max(1, Math.round(partyInfo.size || 0));
-
-        if (latestTimestamp === null || visitTime > latestTimestamp) {
-            latestTimestamp = visitTime;
-        }
-    }
-
-    return {
-        groups,
-        people,
-        updatedAt: latestTimestamp ? new Date(latestTimestamp) : null
-    };
-}
-
 function getQueueStatusLevel(peopleCount) {
     const normalized = Math.max(0, Math.round(Number(peopleCount) || 0));
     for (const level of QUEUE_STATUS_LEVELS) {
@@ -2666,9 +3329,18 @@ function renderWaitGroupsSection(waitGroupCounts = {}, latestVisit = null) {
 
     const normalized = (key) => {
         const data = waitGroupCounts?.[key] || {};
+        const rawUpdatedAt = data.updatedAt;
+        let updatedAt = null;
+        if (rawUpdatedAt instanceof Date && !Number.isNaN(rawUpdatedAt.getTime())) {
+            updatedAt = rawUpdatedAt;
+        } else if (typeof rawUpdatedAt === 'string') {
+            const parsed = new Date(rawUpdatedAt);
+            updatedAt = Number.isNaN(parsed.getTime()) ? null : parsed;
+        }
         return {
             groups: Number.isFinite(Number(data.groups)) ? Number(data.groups) : 0,
-            people: Number.isFinite(Number(data.people)) ? Number(data.people) : 0
+            people: Number.isFinite(Number(data.people)) ? Number(data.people) : 0,
+            updatedAt
         };
     };
 
@@ -2679,20 +3351,28 @@ function renderWaitGroupsSection(waitGroupCounts = {}, latestVisit = null) {
     const itemsHtml = categories
         .map(({ key, label, emoji, rangeLabel, accent }, index) => {
             const data = totals[index];
-            const people = Math.round(data.people);
-            const reports = Math.round(data.groups);
-            const hasPeople = people > 0;
-            const hasReports = reports > 0;
-            const primaryLabel = hasPeople
-                ? `${people} אנשים ממתינים`
-                : hasReports
-                    ? `${reports} דיווחים`
-                    : 'אין נתונים עדיין';
-            const secondaryLabel = activeKey === key
-                ? 'עודכן ממש עכשיו'
-                : hasReports
-                    ? `${reports} דיווחים אחרונים`
-                    : 'היו הראשונים לעדכן';
+            const groups = Math.max(0, Math.round(data.groups));
+            const people = Math.max(0, Math.round(data.people));
+            const updateLabel = data.updatedAt ? formatRelativeTimeFromNow(data.updatedAt) : '';
+
+            let primaryLabel;
+            if (groups > 0) {
+                primaryLabel = groups === 1 ? 'קבוצה אחת ממתינה' : `${groups} קבוצות ממתינות`;
+            } else {
+                primaryLabel = 'אין קבוצות ממתינות כרגע';
+            }
+
+            let secondaryLabel;
+            if (groups > 0) {
+                const peopleLabel = people > 0 ? `כ-${people} אנשים` : 'ללא הערכת אנשים';
+                secondaryLabel = updateLabel ? `${peopleLabel} · עודכן לפני ${updateLabel}` : peopleLabel;
+            } else {
+                secondaryLabel = updateLabel ? `עודכן לפני ${updateLabel}` : 'היו הראשונים לעדכן';
+            }
+
+            if (activeKey === key && updateLabel) {
+                secondaryLabel = `עודכן ממש עכשיו${people > 0 ? ` · כ-${people} אנשים` : ''}`;
+            }
 
             return `<div class="wait-groups__item wait-groups__item--${key} ${activeKey === key ? 'wait-groups__item--active' : ''}" style="--wait-group-accent: ${escapeHtml(accent)}">
                 <span class="wait-groups__emoji" aria-hidden="true">${escapeHtml(emoji)}</span>
@@ -2707,8 +3387,8 @@ function renderWaitGroupsSection(waitGroupCounts = {}, latestVisit = null) {
         .join('');
 
     const hint = totalReports > 0
-        ? `מבוסס על ${totalReports} צ'ק-אינים אחרונים – מתעדכן בזמן אמת לכל הצופים.`
-        : 'היו הראשונים לשתף צ׳ק-אין – העדכון יוצג מיד לכל מי שצופה במקום.';
+        ? 'הנתונים מבוססים על צ\'ק-אינים חיים מהדקות האחרונות ומציגים מי ממתין כרגע.'
+        : 'אין כרגע צ\'ק-אינים פעילים בגודל קבוצה זה – היו הראשונים לעדכן.';
 
     return `
         <section class="wait-groups">
@@ -2806,7 +3486,7 @@ function showLocationCard(name, id) {
     if (!targetDetailsCard) return;
     const locationData = getLocationFromCache(id) || { id, name, totalCheckIns: 0, avgWaitSeconds: 0, visits: [], coords: sanitizeCoords(targetCoords), intel: null };
 
-    const stats = computeLocationStats(locationData.visits);
+    const stats = computeLocationStats(locationData.visits, { liveQueue: locationData.liveQueue });
     const latestVisit = Array.isArray(locationData.visits) && locationData.visits.length > 0
         ? locationData.visits[0]
         : null;
@@ -2818,8 +3498,7 @@ function showLocationCard(name, id) {
         maxLength: 240
     });
     const placeInfoHtml = renderSelectedPlaceInfoSection(selectedPlaceInfo);
-    const queueStatusSection = renderQueueStatusSection(locationData.visits);
-    const waitSnapshotHtml = renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts);
+    const waitGroupsHtml = renderWaitGroupsSection(stats.waitGroupCounts, latestVisit);
     const intelSubtitle = hasIntel
         ? 'תובנות בזמן אמת לחוויה חלקה'
         : 'המידע יופיע כאן לאחר צ׳ק-אין מעודכן של הקהילה';
@@ -2854,8 +3533,7 @@ function showLocationCard(name, id) {
                 </div>
             </header>
             ${placeInfoHtml}
-            ${queueStatusSection}
-            ${waitSnapshotHtml}
+            ${waitGroupsHtml}
             ${intelSection}
             <div class="location-card__actions">
                 <button type="button" class="location-card__checkin-btn">צ'ק-אין למקום</button>
@@ -2899,10 +3577,37 @@ function showLocationCard(name, id) {
 }
 
 // --- 4. Check-In Logic ---
-function startCheckIn() {
+async function startCheckIn(options = {}) {
     if (!targetCoords) {
         alert("אנא בחר מיקום תחילה.");
         return;
+    }
+
+    if (!options.skipPrompt) {
+        try {
+            const defaultKey = options.partySizeKey || pendingPartySizeSelectionKey || selectedPartySizeKey || 'small';
+            const confirmedKey = await promptForPartySize(defaultKey);
+            if (!confirmedKey) {
+                return;
+            }
+            startCheckIn({ ...options, partySizeKey: confirmedKey, skipPrompt: true });
+            return;
+        } catch (error) {
+            console.error('Failed to resolve party size prompt', error);
+            return;
+        }
+    }
+
+    const locationData = currentLocationId ? getLocationFromCache(currentLocationId) : null;
+    const normalizedPartyKey = normalizePartySizeKey(options.partySizeKey || selectedPartySizeKey || 'small');
+    selectedPartySizeKey = normalizedPartyKey;
+    setPendingPartySizeSelectionKey(normalizedPartyKey);
+    setSelectedPartySizeKey(normalizedPartyKey);
+    activeWaitPartyKey = normalizedPartyKey;
+    activeWaitLocationId = currentLocationId;
+
+    if (activeWaitSessionId && activeWaitLocationId) {
+        void releaseLiveQueueEntry(activeWaitLocationId, activeWaitSessionId, { silent: true, keepState: true });
     }
 
     // Hide main screen, show waiting screen
@@ -2910,12 +3615,6 @@ function startCheckIn() {
     waitingScreen.classList.remove('hidden');
 
     waitingLocationName.textContent = targetName;
-
-    if (selectedPartySizeKey) {
-        setSelectedPartySizeKey(selectedPartySizeKey);
-    } else {
-        setSelectedPartySizeKey('small');
-    }
 
     // Reset UI
     timerDisplay.textContent = "00:00";
@@ -2945,6 +3644,17 @@ function startCheckIn() {
 
     // Init Mini Map
     setTimeout(initMiniMap, 100);
+
+    if (currentLocationId) {
+        const baseData = {
+            id: currentLocationId,
+            name: targetName,
+            coords: sanitizeCoords(targetCoords),
+            visits: Array.isArray(locationData?.visits) ? locationData.visits : []
+        };
+
+        void registerLiveQueueEntry(currentLocationId, normalizedPartyKey, { baseData });
+    }
 
     updateState();
 }
@@ -3050,6 +3760,14 @@ async function finishCheckIn(saveData) {
     gpsCountdownInterval = null;
 
     destroyMiniMap(); // Destroy mini-map
+
+    const releaseSessionId = activeWaitSessionId;
+    const releaseLocationId = activeWaitLocationId || currentLocationId;
+    if (releaseSessionId && releaseLocationId) {
+        await releaseLiveQueueEntry(releaseLocationId, releaseSessionId);
+    } else {
+        clearActiveWaitSessionStorage();
+    }
 
     const finalTimeDisplay = timerDisplay.textContent;
 
@@ -3463,15 +4181,11 @@ async function updateLocationName(id, newName) {
     }
 }
 
-function computeLocationStats(visits) {
+function computeLocationStats(visits, options = {}) {
     const safeVisits = Array.isArray(visits) ? visits : [];
+    const liveQueue = options?.liveQueue ?? null;
     const totals = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
     const counts = Array.from({ length: DAY_NAMES_HE.length }, () => Array.from({ length: HOURS_PER_DAY }, () => 0));
-    const waitGroupCounts = {
-        small: { groups: 0, people: 0 },
-        medium: { groups: 0, people: 0 },
-        large: { groups: 0, people: 0 }
-    };
 
     const groupKeys = Object.keys(WAIT_GROUP_CATEGORY_METADATA);
     const totalsByGroup = {};
@@ -3490,10 +4204,6 @@ function computeLocationStats(visits) {
         const waitSeconds = Number(visit.waitSeconds);
 
         const partyInfo = resolveVisitPartyInfo(visit);
-        if (partyInfo) {
-            waitGroupCounts[partyInfo.key].groups += 1;
-            waitGroupCounts[partyInfo.key].people += partyInfo.size;
-        }
 
         if (dayIndex === null || hourIndex === null) continue;
         if (dayIndex < 0 || dayIndex >= DAY_NAMES_HE.length) continue;
@@ -3549,6 +4259,8 @@ function computeLocationStats(visits) {
         return acc;
     }, {});
 
+    const waitGroupCounts = computeCurrentWaitGroupCounts(safeVisits, { ...options, liveQueue });
+
     return { hourlyAverages, weeklyAverages, counts, waitGroupCounts, hourlyAveragesByGroup, weeklyAveragesByGroup };
 }
 
@@ -3557,6 +4269,64 @@ const PARTY_SIZE_ESTIMATES = Object.freeze({
     medium: 5,
     large: 8
 });
+
+function computeCurrentWaitGroupCounts(visits, { liveQueue = null } = {}) {
+    const categories = Object.values(WAIT_GROUP_CATEGORY_METADATA);
+
+    if (!Array.isArray(categories) || categories.length === 0) {
+        return {};
+    }
+
+    const normalizedQueue = liveQueue ? normalizeLiveQueueRecord(liveQueue) : { entries: [], updatedAt: null };
+    const queueEntries = Array.isArray(normalizedQueue.entries) ? normalizedQueue.entries : [];
+    const queueUpdatedAtDate = normalizedQueue.updatedAt ? new Date(normalizedQueue.updatedAt) : null;
+    const now = Date.now();
+    const queueUpdatedAtMs = queueUpdatedAtDate ? queueUpdatedAtDate.getTime() : null;
+    const queueIsStale = queueUpdatedAtMs !== null && (now - queueUpdatedAtMs > LIVE_QUEUE_STALE_MINUTES * 60 * 1000);
+    const entryStaleThreshold = now - LIVE_QUEUE_ENTRY_STALE_MINUTES * 60 * 1000;
+
+    return categories.reduce((acc, category) => {
+        const bucket = {
+            groups: 0,
+            people: 0,
+            updatedAt: queueUpdatedAtDate || null
+        };
+
+        if (!queueIsStale && queueEntries.length > 0) {
+            for (const entry of queueEntries) {
+                const entryCategory = normalizePartySizeKey(entry?.category);
+                if (entryCategory !== category.key) {
+                    continue;
+                }
+
+                const entryId = typeof entry?.id === 'string' ? entry.id.trim() : '';
+                if (!entryId) {
+                    continue;
+                }
+
+                const enteredAt = entry?.enteredAt ? new Date(entry.enteredAt) : null;
+                if (enteredAt && enteredAt.getTime() < entryStaleThreshold) {
+                    continue;
+                }
+
+                const sizeCandidate = Number(entry?.size);
+                const estimatedPeople = Number.isFinite(sizeCandidate) && sizeCandidate > 0
+                    ? sizeCandidate
+                    : (WAIT_GROUP_CATEGORY_METADATA[entryCategory]?.estimate || 0);
+
+                bucket.groups += 1;
+                bucket.people += estimatedPeople;
+
+                if (enteredAt && (!bucket.updatedAt || enteredAt > bucket.updatedAt)) {
+                    bucket.updatedAt = enteredAt;
+                }
+            }
+        }
+
+        acc[category.key] = bucket;
+        return acc;
+    }, {});
+}
 
 function resolveVisitPartyInfo(visit) {
     const rawCategory = typeof visit?.partySizeCategory === 'string'
@@ -4077,13 +4847,16 @@ function renderRecentVisits() {
             ? `<button type="button" class="rename-location-btn text-sm bg-amber-100 text-amber-700 font-semibold py-2 px-3 rounded-md hover:bg-amber-200 transition">שינוי שם</button>`
             : '';
 
-        const stats = locationData ? computeLocationStats(locationData.visits) : { waitGroupCounts: {} };
+        const stats = locationData
+            ? computeLocationStats(locationData.visits, { liveQueue: locationData.liveQueue })
+            : { waitGroupCounts: {} };
         const latestVisit = locationData?.visits?.[0] || null;
         const waitSnapshotHtml = locationData ? renderCurrentWaitSnapshot(latestVisit, stats.waitGroupCounts) : '';
         const queueStatusHtml = locationData ? renderQueueStatusSection(locationData.visits) : '';
+        const waitGroupsHtml = locationData ? renderWaitGroupsSection(stats.waitGroupCounts, latestVisit) : '';
         const placeInfoHtml = renderSelectedPlaceInfoSection(visit?.placeInfo || null);
 
-        const detailsSections = [waitSnapshotHtml, queueStatusHtml, placeInfoHtml]
+        const detailsSections = [waitSnapshotHtml, queueStatusHtml, waitGroupsHtml, placeInfoHtml]
             .filter((section) => typeof section === 'string' && section.trim().length > 0);
         const detailsHtml = detailsSections.length > 0
             ? detailsSections.join('\n')
